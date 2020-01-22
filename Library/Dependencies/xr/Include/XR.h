@@ -103,6 +103,8 @@ namespace xr
             Size GetWidthAndHeightForViewIndex(size_t viewIndex) const;
             void SetDepthsNearFar(float depthNear, float depthFar);
 
+            // TODO: Probably need pause/resume functionality for ARCore
+
         private:
             std::unique_ptr<Impl> m_impl{};
         };
