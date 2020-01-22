@@ -195,7 +195,7 @@ target_link_libraries(Library
     PRIVATE SPIRV
     PRIVATE spirv-cross-hlsl)
 
-if(WIN32 OR WINDOWS_STORE)
+if(WIN32 OR WINDOWS_STORE OR ANDROID)
     target_link_libraries(Library PRIVATE xr)
 endif()
 

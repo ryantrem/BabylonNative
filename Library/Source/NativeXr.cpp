@@ -107,7 +107,7 @@ namespace Babylon
     class NativeXr
     {
     public:
-        NativeXr::NativeXr();
+        NativeXr();
         ~NativeXr();
 
         void BeginSession(); // TODO: Make this asynchronous.
@@ -118,7 +118,7 @@ namespace Babylon
             return gsl::make_span(m_activeFrameBuffers);
         }
 
-        void SetEngine(Napi::Object& jsEngine)
+        void SetEngine(Napi::Object jsEngine)
         {
             // This implementation must be switched to simply unwrapping the JavaScript object as soon as NativeEngine
             // is transitioned away from a singleton pattern. Part of that change will remove the GetEngine method, as
@@ -764,7 +764,7 @@ namespace Babylon
                 assert(info[0].As<Napi::String>().Utf8Value() == XRSessionType::IMMERSIVE_VR);
             }
 
-            void SetEngine(Napi::Object& jsEngine)
+            void SetEngine(Napi::Object jsEngine)
             {
                 m_xr.SetEngine(jsEngine);
             }

@@ -9,8 +9,8 @@ namespace xr
     class Exception final : public std::exception
     {
     public:
-        Exception::Exception(const char* message);
-        const char* Exception::what() const noexcept;
+        Exception(const char* message);
+        const char* what() const noexcept;
 
     private:
         std::string m_message{};

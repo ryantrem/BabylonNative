@@ -8,7 +8,8 @@ endif()
 set(SOURCES "Include/XR.h")
 
 if (ANDROID)
-    
+    set(SOURCES ${SOURCES}
+        "Source/ARCore/XR.cpp")
 else()
     set(SOURCES ${SOURCES}
         "Source/OpenXR/XR.cpp"
