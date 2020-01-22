@@ -15,3 +15,7 @@ captures/
 *.apk
 *.ap_
 *.log
+
+app/.cxx
+app/src/main/assets/Scripts
+app/src/main/jniLibs

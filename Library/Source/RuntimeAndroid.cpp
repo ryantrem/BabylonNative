@@ -2,6 +2,7 @@
 #include "RuntimeImpl.h"
 
 #include "NativeEngine.h"
+#include "NativeXr.h"
 
 namespace Babylon
 {
@@ -24,6 +25,10 @@ namespace Babylon
 
     void RuntimeImpl::ThreadProcedure()
     {
+        // this->Dispatch([](Env& env) {
+        //     InitializeNativeXr(env);
+        // });
+
         RuntimeImpl::BaseThreadProcedure();
     }
 }

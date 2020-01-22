@@ -20,10 +20,15 @@ JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_surfaceCreated(JNIEnv* env, jo
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_activityOnPause(JNIEnv* env);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_activityOnResume(JNIEnv* env);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_surfaceChanged(JNIEnv* env, jobject obj, jint width, jint height, jobject surface);
+JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_xrSurfaceChanged(JNIEnv* env, jobject obj, jint width, jint height, jobject surface);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_loadScript(JNIEnv* env, jobject obj, jstring path);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_eval(JNIEnv* env, jobject obj, jstring source, jstring sourceURL);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_setTouchInfo(JNIEnv* env, jobject obj, jfloat dx, jfloat dy, jboolean down);
 };
+
+ANativeWindow* xrWindow{};
+uint32_t xrWindowWidth{};
+uint32_t xrWindowHeight{};
 
 std::unique_ptr<Babylon::RuntimeAndroid> runtime{};
 std::unique_ptr<InputManager::InputBuffer> inputBuffer{};
@@ -52,6 +57,14 @@ namespace
         }
         return buffer;
     }
+}
+
+JNIEXPORT void JNICALL
+Java_BabylonNative_Wrapper_xrSurfaceChanged(JNIEnv* env, jobject obj, jint width, jint height, jobject surface)
+{
+    ::xrWindow = ANativeWindow_fromSurface(env, surface);
+    ::xrWindowWidth = width;
+    ::xrWindowHeight = height;
 }
 
 JNIEXPORT void JNICALL

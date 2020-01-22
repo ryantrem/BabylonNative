@@ -2,19 +2,32 @@ package com.android.testapp;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.view.SurfaceView;
 import android.view.View;
+import android.widget.FrameLayout;
+
+
+import java.util.ResourceBundle;
 
 import BabylonNative.BabylonView;
 
 public class AndroidViewAppActivity extends Activity implements BabylonView.ViewDelegate {
     BabylonView mView;
+    SurfaceView mXrView;
 
     // Activity life
     @Override protected void onCreate(Bundle icicle)
     {
         super.onCreate(icicle);
-        mView = new BabylonView(getApplication(), this);
-        setContentView(mView);
+        mXrView = new SurfaceView(getApplication());
+        mView = new BabylonView(mXrView, getApplication(), this);
+        //setContentView(mView);
+        setContentView(R.layout.layout);
+        FrameLayout frame1 = this.findViewById(R.id.layout1);
+        frame1.addView(mView);
+
+        FrameLayout frame2 = this.findViewById(R.id.layout2);
+        frame2.addView(mXrView);
     }
 
     @Override protected void onPause()

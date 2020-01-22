@@ -138,7 +138,7 @@ CreateBoxAsync().then(function () {
                 }, 5000);
                 return xr.baseExperience.enterXRAsync("immersive-vr", "unbounded", xr.renderTarget);
             });
-        }, 5000);
+        }, 10000);
     }
     
 }, function (ex) {

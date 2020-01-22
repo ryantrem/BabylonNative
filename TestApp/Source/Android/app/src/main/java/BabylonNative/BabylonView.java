@@ -15,9 +15,13 @@ public class BabylonView extends SurfaceView implements SurfaceHolder.Callback2,
     private boolean mViewReady = false;
     private ViewDelegate mViewDelegate;
 
-    public BabylonView(Context context, ViewDelegate viewDelegate) {
+    public BabylonView(SurfaceView xrView, Context context, ViewDelegate viewDelegate) {
         super(context);
         init(viewDelegate);
+
+        SurfaceHolder xrHolder = xrView.getHolder();
+        xrHolder.addCallback(this);
+
         BabylonNative.Wrapper.initEngine(context.getResources().getAssets());
     }
 
@@ -50,10 +54,12 @@ public class BabylonView extends SurfaceView implements SurfaceHolder.Callback2,
      * not normally called or subclassed by clients of BabylonView.
      */
     public void surfaceCreated(SurfaceHolder holder) {
-        BabylonNative.Wrapper.surfaceCreated(getHolder().getSurface());
-        if (!this.mViewReady) {
-            mViewDelegate.onViewReady();
-            mViewReady = true;
+        if (holder == this.getHolder()) {
+            BabylonNative.Wrapper.surfaceCreated(getHolder().getSurface());
+            if (!this.mViewReady) {
+                mViewDelegate.onViewReady();
+                mViewReady = true;
+            }
         }
     }
 
@@ -69,7 +75,11 @@ public class BabylonView extends SurfaceView implements SurfaceHolder.Callback2,
      * not normally called or subclassed by clients of BabylonView.
      */
     public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {
-        BabylonNative.Wrapper.surfaceChanged(w, h, getHolder().getSurface());
+        if (holder == this.getHolder()) {
+            BabylonNative.Wrapper.surfaceChanged(w, h, getHolder().getSurface());
+        } else {
+            BabylonNative.Wrapper.xrSurfaceChanged(w, h, getHolder().getSurface());
+        }
     }
 
     public interface ViewDelegate {

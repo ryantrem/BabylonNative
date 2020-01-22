@@ -5,6 +5,7 @@
 
 namespace xr
 {
+    // TODO: Move this to a common cpp
     Exception::Exception(const char* message)
         : m_message{ message }
     {}
@@ -13,4 +14,6 @@ namespace xr
     {
         return m_message.c_str();
     }
+
+    
 }
