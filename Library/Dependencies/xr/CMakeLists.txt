@@ -1,28 +1,39 @@
 cmake_minimum_required(VERSION 3.12)
 
 set(DYNAMIC_LOADER OFF CACHE BOOL "Build the loader as a .dll library")
-add_subdirectory(Dependencies/OpenXR-SDK)
+if (NOT ANDROID)
+    add_subdirectory(Dependencies/OpenXR-SDK)
+endif()
 
-set(SOURCES
-    "Include/XR.h"
-    "Source/XR.cpp"
-    "Source/XrPlatformCommon.h")
+set(SOURCES "Include/XR.h")
 
-if(WIN32 OR WINDOWS_STORE)
-    set(SOURCES ${SOURCES} "Source/Windows/XrPlatform.h")
+if (ANDROID)
+    
 else()
-    message(FATAL_ERROR "XR support not implemented for platform ${BABYLON_NATIVE_PLATFORM}")
+    set(SOURCES ${SOURCES}
+        "Source/OpenXR/XR.cpp"
+        "Source/OpenXR/XrPlatformCommon.h")
+
+    if(WIN32 OR WINDOWS_STORE)
+        set(SOURCES ${SOURCES} "Source/OpenXR/Windows/XrPlatform.h")
+    else()
+        message(FATAL_ERROR "OpenXR support not available for platform ${BABYLON_NATIVE_PLATFORM}")
+    endif()
 endif()
 
 add_library(xr ${SOURCES})
 
-target_include_directories(xr PRIVATE "Dependencies/OpenXR-SDK/include")
+if (NOT ANDROID)
+    target_include_directories(xr PRIVATE "Dependencies/OpenXR-SDK/include")
+endif()
 
-target_include_directories(xr PRIVATE "Source")
+target_include_directories(xr PRIVATE "Source/OpenXR")
 if(WIN32 OR WINDOWS_STORE)
-    target_include_directories(xr PRIVATE "Source/Windows")
+    target_include_directories(xr PRIVATE "Source/OpenXR/Windows")
 endif()
 
 target_include_directories(xr PUBLIC "Include")
 
-target_link_libraries(xr PRIVATE openxr_loader)
+if (NOT ANDROID)
+    target_link_libraries(xr PRIVATE openxr_loader)
+endif()

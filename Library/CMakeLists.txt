@@ -95,11 +95,15 @@ if(WINDOWS_STORE)
     target_compile_definitions(libcurl PRIVATE "WINAPI_PARTITION_DESKTOP=1")
 endif()
 
+# XR is supported via OpenXR or ARCore (Android specific).
+if(WIN32 OR WINDOWS_STORE OR ANDROID)
+    add_subdirectory(Dependencies/xr)
+    set_property(TARGET xr PROPERTY FOLDER Dependencies/xr)
+endif()
+
 # Currently OpenXR is only supported on Win32. More platforms will be added as 
 # they become viable/available.
 if(WIN32 OR WINDOWS_STORE)
-    add_subdirectory(Dependencies/xr)
-    set_property(TARGET xr PROPERTY FOLDER Dependencies/xr)
     set_property(TARGET openxr_loader PROPERTY FOLDER Dependencies/xr/OpenXR)
     set_property(TARGET generate_openxr_header PROPERTY FOLDER Dependencies/xr/OpenXR/Generated)
     set_property(TARGET xr_global_generated_files PROPERTY FOLDER Dependencies/xr/OpenXR/Generated)
@@ -140,7 +144,7 @@ elseif(APPLE)
 endif()
 
 # Platform-specific XR plugin (only included when used)
-if(WIN32 OR WINDOWS_STORE)
+if(WIN32 OR WINDOWS_STORE OR ANDROID)
     set(SOURCES ${SOURCES}
         "Source/NativeXr.cpp"
         "Source/NativeXr.h")
