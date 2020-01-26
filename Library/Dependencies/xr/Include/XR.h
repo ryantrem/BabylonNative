@@ -92,7 +92,7 @@ namespace xr
                 int64_t m_displayTime{};
             };
 
-            Session(System& headMountedDisplay, void* graphicsDevice);
+            Session(System& system, void* graphicsDevice);
             ~Session();
 
             Session(Session&) = delete;
