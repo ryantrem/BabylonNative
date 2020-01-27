@@ -5,6 +5,7 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <EGL/egl.h>
 
 #include <android/native_window.h>
 
@@ -49,38 +50,50 @@ namespace xr
         std::vector<Frame::View> ActiveFrameViews{ {} };
         float DepthNearZ{ DEFAULT_DEPTH_NEAR_Z };
         float DepthFarZ{ DEFAULT_DEPTH_FAR_Z };
-        bool sessionEnded{ false };
+        bool SessionEnded{ false };
+        EGLDisplay Display{};
+        EGLSurface Surface{};
 
         Impl(System::Impl& hmdImpl, void* graphicsContext)
             : HmdImpl{ hmdImpl }
         {
             // graphicsContext is an EGLContext
             // grab and store the ANativeWindow pointer (the drawing surface)
-            
+            Display = eglGetCurrentDisplay();
+            Surface = eglGetCurrentSurface(EGL_DRAW);
+            size_t width, height;
+            {
+                EGLint _width, _height;
+                eglQuerySurface(eglGetDisplay(EGL_DEFAULT_DISPLAY), Surface, EGL_WIDTH, &_width);
+                eglQuerySurface(eglGetDisplay(EGL_DEFAULT_DISPLAY), Surface, EGL_HEIGHT, &_height);
+                width = static_cast<size_t>(_width);
+                height = static_cast<size_t >(_height);
+            }
+
             // Allocate and store the render texture and camera texture
             GLuint colorTextureId;
             glGenTextures(1, &colorTextureId);
             glBindTexture(GL_TEXTURE_2D, colorTextureId);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1024, 768, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glBindTexture(GL_TEXTURE_2D, 0);
             ActiveFrameViews[0].ColorTexturePointer = reinterpret_cast<void*>(colorTextureId);
             ActiveFrameViews[0].ColorTextureFormat = TextureFormat::RGBA8_SRGB;
-            ActiveFrameViews[0].ColorTextureSize = {1024, 768};
+            ActiveFrameViews[0].ColorTextureSize = {width, height};
 
             GLuint depthTextureId;
             glGenTextures(1, &depthTextureId);
             glBindTexture(GL_TEXTURE_2D, depthTextureId);
-            //glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, 1024, 768, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, nullptr);
-            //glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24_OES, 1024, 768, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, nullptr);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8_OES, 1024, 768, 0, GL_DEPTH_STENCIL_OES, GL_UNSIGNED_INT_24_8_OES, nullptr);
+            //glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, width, height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, nullptr);
+            //glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24_OES, width, height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8_OES, width, height, 0, GL_DEPTH_STENCIL_OES, GL_UNSIGNED_INT_24_8_OES, nullptr);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glBindTexture(GL_TEXTURE_2D, 0);
             ActiveFrameViews[0].DepthTexturePointer = reinterpret_cast<void*>(depthTextureId);
             ActiveFrameViews[0].DepthTextureFormat = TextureFormat::D24S8;
-            ActiveFrameViews[0].DepthTextureSize = {1024, 768};
+            ActiveFrameViews[0].DepthTextureSize = {width, height};
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
@@ -88,7 +101,7 @@ namespace xr
 
         std::unique_ptr<System::Session::Frame> GetNextFrame(bool& shouldEndSession, bool& shouldRestartSession)
         {
-            shouldEndSession = sessionEnded;
+            shouldEndSession = SessionEnded;
             shouldRestartSession = false;
             // Call ArSession_setCameraTextureName and ArSession_update
             return std::make_unique<Frame>(*this);
@@ -97,7 +110,7 @@ namespace xr
         void RequestEndSession()
         {
             // Call ArSession_destroy and ArFrame_destroy, or maybe do this in the destructor
-            sessionEnded = true;
+            SessionEnded = true;
         }
 
         Size GetWidthAndHeightForViewIndex(size_t viewIndex) const
@@ -130,6 +143,22 @@ namespace xr
     System::Session::Frame::~Frame()
     {
         // Probably draw to the xr surface here
+
+        // Maybe need to clear the frame buffer to tell it to draw to the screen (0 is the "default" frame buffer/the on-screen frame buffer)
+        // (http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-14-render-to-texture/#using-the-rendered-texture)
+        //glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // Maybe need to cache and restore the current frame buffer after rendering (not sure)
+        //GLint currentFrameBuffer;
+        //glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFrameBuffer);
+
+        // These are *not* changed when rendering to an off-screen frame buffer (rather than the default/on-screen frame buffer)
+        //auto surface = eglGetCurrentSurface(EGL_DRAW);
+        //auto display = eglGetCurrentDisplay();
+
+        // Probably need to call eglSwapBuffers as this is what the simple example in the book does (https://learning.oreilly.com/library/view/advanced-androidtm-application/9780133892420/ch24.html#ch24lev2sec3)
+        // The ARCore examples and the render_To_texture example do not do this
+        // mEGL.eglSwapBuffers(display, surface);
     }
 
     System::System(const char* appName)
