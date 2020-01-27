@@ -23,8 +23,9 @@ endif()
 
 add_library(xr ${SOURCES})
 
-#message(ARCORE_LIBPATH ${ARCORE_LIBPATH})
-#message(ANDROID_ABI ${ANDROID_ABI})
+target_compile_definitions(xr PRIVATE _CRT_SECURE_NO_WARNINGS)
+
+target_include_directories(xr PRIVATE "Dependencies/OpenXR-SDK/include")
 
 if (ANDROID)
     add_library(arcore SHARED IMPORTED)
