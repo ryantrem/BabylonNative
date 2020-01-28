@@ -43,6 +43,107 @@ namespace xr
         }
     };
 
+    namespace
+    {
+        const GLfloat kVertices[] = { -1.0f, -1.0f, +1.0f, -1.0f, -1.0f, +1.0f, +1.0f, +1.0f, };
+        const GLfloat kUVs[] =      { +0.0f, +0.0f, +1.0f, +0.0f, +0.0f, +1.0f, +1.0f, +1.0f, };
+
+        constexpr char QUAD_VERT_SHADER[] = R"(
+            attribute vec4 a_Position;
+            attribute vec2 a_TexCoord;
+
+            varying vec2 v_TexCoord;
+
+            void main() {
+                gl_Position = a_Position;
+                v_TexCoord = a_TexCoord;
+            }
+        )";
+
+        const char QUAD_FRAG_SHADER[] = R"(
+            //#extension GL_OES_EGL_image_external : require
+
+            precision mediump float;
+            varying vec2 v_TexCoord;
+            //uniform samplerExternalOES sTexture;
+            uniform sampler2D texture_color;
+
+            void main() {
+                //gl_FragColor = texture2D(texture_color, v_TexCoord);
+                gl_FragColor = vec4(1.0,0.0,1.0,1.0);
+            }
+        )";
+
+        GLuint LoadShader(GLenum shader_type, const char* shader_source)
+        {
+            GLuint shader = glCreateShader(shader_type);
+            if (!shader) {
+                return shader;
+            }
+
+            glShaderSource(shader, 1, &shader_source, nullptr);
+            glCompileShader(shader);
+            GLint compiled = 0;
+            glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+
+            if (!compiled) {
+                GLint info_len = 0;
+
+                glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &info_len);
+                if (!info_len) {
+                    return shader;
+                }
+
+                char* buf = reinterpret_cast<char*>(malloc(static_cast<size_t>(info_len)));
+                if (!buf) {
+                    return shader;
+                }
+
+                glGetShaderInfoLog(shader, info_len, nullptr, buf);
+                // TODO: Throw exception
+                free(buf);
+                glDeleteShader(shader);
+                shader = 0;
+            }
+
+            return shader;
+        }
+
+        GLuint CreateShaderProgram()
+        {
+            GLuint vertShader = LoadShader(GL_VERTEX_SHADER, QUAD_VERT_SHADER);
+            GLuint fragShader = LoadShader(GL_FRAGMENT_SHADER, QUAD_FRAG_SHADER);
+
+            GLuint program = glCreateProgram();
+            if (program)
+            {
+                glAttachShader(program, vertShader);
+                glAttachShader(program, fragShader);
+
+                glLinkProgram(program);
+                GLint link_status = GL_FALSE;
+                glGetProgramiv(program, GL_LINK_STATUS, &link_status);
+
+                if (link_status != GL_TRUE)
+                {
+                    GLint buf_length = 0;
+                    glGetProgramiv(program, GL_INFO_LOG_LENGTH, &buf_length);
+                    if (buf_length) {
+                        char* buf = reinterpret_cast<char*>(malloc(static_cast<size_t>(buf_length)));
+                        if (buf) {
+                            glGetProgramInfoLog(program, buf_length, nullptr, buf);
+                            // TODO: Throw exception
+                            free(buf);
+                        }
+                    }
+                    glDeleteProgram(program);
+                    program = 0;
+                }
+            }
+            return program;
+        }
+    }
+
     class System::Session::Impl
     {
     public:
@@ -53,6 +154,11 @@ namespace xr
         bool SessionEnded{ false };
         EGLDisplay Display{};
         EGLSurface Surface{};
+
+        GLuint shader_program_;
+        GLint attribute_vertices_;
+        GLint attribute_uvs_;
+        GLint uniform_texture_;
 
         Impl(System::Impl& hmdImpl, void* graphicsContext)
             : HmdImpl{ hmdImpl }
@@ -94,6 +200,12 @@ namespace xr
             ActiveFrameViews[0].DepthTexturePointer = reinterpret_cast<void*>(depthTextureId);
             ActiveFrameViews[0].DepthTextureFormat = TextureFormat::D24S8;
             ActiveFrameViews[0].DepthTextureSize = {width, height};
+
+            shader_program_ = CreateShaderProgram();
+
+            uniform_texture_ = glGetUniformLocation(shader_program_, "texture_color");
+            attribute_vertices_ = glGetAttribLocation(shader_program_, "a_Position");
+            attribute_uvs_ = glGetAttribLocation(shader_program_, "a_TexCoord");
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
@@ -151,6 +263,27 @@ namespace xr
         // Maybe need to cache and restore the current frame buffer after rendering (not sure)
         //GLint currentFrameBuffer;
         //glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFrameBuffer);
+
+        glClearColor(0, 1, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glUseProgram(m_sessionImpl.shader_program_);
+        glDepthMask(GL_FALSE);
+
+        glUniform1i(m_sessionImpl.uniform_texture_, 1);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, reinterpret_cast<GLuint>(Views[0].ColorTexturePointer));
+
+        glEnableVertexAttribArray(m_sessionImpl.attribute_vertices_);
+        glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
+
+        glEnableVertexAttribArray(m_sessionImpl.attribute_uvs_);
+        glVertexAttribPointer(m_sessionImpl.attribute_uvs_, 2, GL_FLOAT, GL_FALSE, 0, kUVs);
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        glUseProgram(0);
+        glDepthMask(GL_TRUE);
 
         // These are *not* changed when rendering to an off-screen frame buffer (rather than the default/on-screen frame buffer)
         //auto surface = eglGetCurrentSurface(EGL_DRAW);
