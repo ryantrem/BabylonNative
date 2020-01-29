@@ -5,6 +5,7 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+//#include <GLES3/gl3.h>
 #include <EGL/egl.h>
 
 #include <android/native_window.h>
@@ -55,6 +56,7 @@ namespace xr
             varying vec2 v_TexCoord;
 
             void main() {
+                //gl_Position = vec4(a_Position, 0.0, 1.0);
                 gl_Position = a_Position;
                 v_TexCoord = a_TexCoord;
             }
@@ -264,21 +266,32 @@ namespace xr
         //GLint currentFrameBuffer;
         //glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFrameBuffer);
 
+        //glEnable(GL_BLEND);
+        //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         glClearColor(0, 1, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        //glBlitFrameBuffer
 
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
 
-        glUniform1i(m_sessionImpl.uniform_texture_, 1);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, reinterpret_cast<GLuint>(Views[0].ColorTexturePointer));
+        if (m_sessionImpl.uniform_texture_ >= 0) {
+            glUniform1i(m_sessionImpl.uniform_texture_, 1);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, reinterpret_cast<GLuint>(Views[0].ColorTexturePointer));
+        }
 
-        glEnableVertexAttribArray(m_sessionImpl.attribute_vertices_);
-        glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
+        if (m_sessionImpl.attribute_vertices_ >= 0) {
+            glEnableVertexAttribArray(m_sessionImpl.attribute_vertices_);
+            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
+        }
 
-        glEnableVertexAttribArray(m_sessionImpl.attribute_uvs_);
-        glVertexAttribPointer(m_sessionImpl.attribute_uvs_, 2, GL_FLOAT, GL_FALSE, 0, kUVs);
+        if (m_sessionImpl.attribute_uvs_ >= 0) {
+            glEnableVertexAttribArray(m_sessionImpl.attribute_uvs_);
+            glVertexAttribPointer(m_sessionImpl.attribute_uvs_, 2, GL_FLOAT, GL_FALSE, 0, kUVs);
+        }
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
