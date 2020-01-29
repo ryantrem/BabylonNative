@@ -26,9 +26,9 @@ add_library(xr ${SOURCES})
 
 if (NOT ANDROID)
     target_include_directories(xr PRIVATE "Dependencies/OpenXR-SDK/include")
+    target_include_directories(xr PRIVATE "Source/OpenXR")
 endif()
 
-target_include_directories(xr PRIVATE "Source/OpenXR")
 if(WIN32 OR WINDOWS_STORE)
     target_include_directories(xr PRIVATE "Source/OpenXR/Windows")
 endif()

@@ -10,6 +10,8 @@
 
 #include <android/native_window.h>
 
+//#include <arcore_c_api.h>
+
 extern ANativeWindow* xrWindow;
 extern uint32_t xrWindowWidth;
 extern uint32_t xrWindowHeight;
@@ -162,6 +164,8 @@ namespace xr
         GLint attribute_uvs_;
         GLint uniform_texture_;
 
+        //ArSession
+
         Impl(System::Impl& hmdImpl, void* graphicsContext)
             : HmdImpl{ hmdImpl }
         {
@@ -271,6 +275,7 @@ namespace xr
 
         glClearColor(0, 1, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
+        //glLineWidth(5);
 
         //glBlitFrameBuffer
 
@@ -294,6 +299,7 @@ namespace xr
         }
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        //glDrawArrays(GL_LINE_STRIP, 0, 4);
 
         glUseProgram(0);
         glDepthMask(GL_TRUE);
