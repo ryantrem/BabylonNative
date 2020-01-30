@@ -5,7 +5,7 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
-//#include <GLES3/gl3.h>
+#include <GLES3/gl3.h>
 #include <EGL/egl.h>
 
 #include <android/native_window.h>
@@ -163,6 +163,8 @@ namespace xr
         GLint attribute_vertices_;
         GLint attribute_uvs_;
         GLint uniform_texture_;
+        GLuint vertexArray;
+        GLuint vertexBuffer;
 
         //ArSession
 
@@ -212,6 +214,13 @@ namespace xr
             uniform_texture_ = glGetUniformLocation(shader_program_, "texture_color");
             attribute_vertices_ = glGetAttribLocation(shader_program_, "a_Position");
             attribute_uvs_ = glGetAttribLocation(shader_program_, "a_TexCoord");
+
+            glGenVertexArrays(1, &vertexArray);
+            glBindVertexArray(vertexArray);
+
+            glGenBuffers(1, &vertexBuffer);
+            glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
@@ -290,7 +299,8 @@ namespace xr
 
         if (m_sessionImpl.attribute_vertices_ >= 0) {
             glEnableVertexAttribArray(m_sessionImpl.attribute_vertices_);
-            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
+            //glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
+            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
         }
 
         if (m_sessionImpl.attribute_uvs_ >= 0) {
