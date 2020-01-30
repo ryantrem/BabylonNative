@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
 set(DYNAMIC_LOADER OFF CACHE BOOL "Build the loader as a .dll library")
-if (NOT ANDROID)
-    add_subdirectory(Dependencies/OpenXR-SDK)
-endif()
 
 set(SOURCES "Include/XR.h")
 
@@ -11,6 +8,8 @@ if (ANDROID)
     set(SOURCES ${SOURCES}
         "Source/ARCore/XR.cpp")
 else()
+    add_subdirectory(Dependencies/OpenXR-SDK)
+
     set(SOURCES ${SOURCES}
         "Source/OpenXR/XR.cpp"
         "Source/OpenXR/XrPlatformCommon.h")
@@ -24,17 +23,17 @@ endif()
 
 add_library(xr ${SOURCES})
 
-if (NOT ANDROID)
+if (ANDROID)
+    
+else()
+    if(WIN32 OR WINDOWS_STORE)
+        target_include_directories(xr PRIVATE "Source/OpenXR/Windows")
+    endif()
+
     target_include_directories(xr PRIVATE "Dependencies/OpenXR-SDK/include")
     target_include_directories(xr PRIVATE "Source/OpenXR")
-endif()
 
-if(WIN32 OR WINDOWS_STORE)
-    target_include_directories(xr PRIVATE "Source/OpenXR/Windows")
+    target_link_libraries(xr PRIVATE openxr_loader)
 endif()
 
 target_include_directories(xr PUBLIC "Include")
-
-if (NOT ANDROID)
-    target_link_libraries(xr PRIVATE openxr_loader)
-endif()
