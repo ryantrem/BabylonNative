@@ -10,11 +10,16 @@
 
 #include <android/native_window.h>
 
-//#include <arcore_c_api.h>
+#include <arcore_c_api.h>
+
+#include <jni.h>
 
 extern ANativeWindow* xrWindow;
 extern uint32_t xrWindowWidth;
 extern uint32_t xrWindowHeight;
+
+/*extern JNIEnv* g_env;
+extern jobject g_appContext;*/
 
 namespace xr
 {
@@ -166,7 +171,7 @@ namespace xr
         GLuint vertexArray;
         GLuint vertexBuffer;
 
-        //ArSession
+        ArSession* session;
 
         Impl(System::Impl& hmdImpl, void* graphicsContext)
             : HmdImpl{ hmdImpl }
@@ -224,6 +229,9 @@ namespace xr
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
+
+            // This needs to be called from the UI thread (e.g. an Activity's onResume)
+            //ArSession_create(g_env, g_appContext, &session);
         }
 
         std::unique_ptr<System::Session::Frame> GetNextFrame(bool& shouldEndSession, bool& shouldRestartSession)
