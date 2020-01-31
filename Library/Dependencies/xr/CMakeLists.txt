@@ -23,8 +23,19 @@ endif()
 
 add_library(xr ${SOURCES})
 
+#message(ARCORE_LIBPATH ${ARCORE_LIBPATH})
+#message(ANDROID_ABI ${ANDROID_ABI})
+
 if (ANDROID)
-    
+    add_library(arcore SHARED IMPORTED)
+    set_target_properties(arcore PROPERTIES IMPORTED_LOCATION
+                          ${ARCORE_LIBPATH}/${ANDROID_ABI}/libarcore_sdk_c.so
+                          INTERFACE_INCLUDE_DIRECTORIES Dependencies/arcore-android-sdk/libraries/include)
+
+    add_library(glm INTERFACE)
+    set_target_properties(glm PROPERTIES INTERFACE_INCLUDE_DIRECTORIES Dependencies/arcore-android-sdk/libraries/glm)
+
+    target_link_libraries(xr PRIVATE glm arcore)
 else()
     if(WIN32 OR WINDOWS_STORE)
         target_include_directories(xr PRIVATE "Source/OpenXR/Windows")
