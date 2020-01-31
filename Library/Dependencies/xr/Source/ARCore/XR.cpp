@@ -215,12 +215,12 @@ namespace xr
             attribute_vertices_ = glGetAttribLocation(shader_program_, "a_Position");
             attribute_uvs_ = glGetAttribLocation(shader_program_, "a_TexCoord");
 
-            glGenVertexArrays(1, &vertexArray);
+            /*glGenVertexArrays(1, &vertexArray);
             glBindVertexArray(vertexArray);
 
             glGenBuffers(1, &vertexBuffer);
             glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);*/
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
@@ -243,7 +243,7 @@ namespace xr
         Size GetWidthAndHeightForViewIndex(size_t viewIndex) const
         {
             // Just return the window/surface width/height
-            return {0,0};
+            return {1,1};
         }
     };
 
@@ -273,11 +273,11 @@ namespace xr
 
         // Maybe need to clear the frame buffer to tell it to draw to the screen (0 is the "default" frame buffer/the on-screen frame buffer)
         // (http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-14-render-to-texture/#using-the-rendered-texture)
-        //glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         // Maybe need to cache and restore the current frame buffer after rendering (not sure)
-        //GLint currentFrameBuffer;
-        //glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFrameBuffer);
+        GLint currentFrameBuffer;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFrameBuffer);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         //glEnable(GL_BLEND);
         //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -299,8 +299,8 @@ namespace xr
 
         if (m_sessionImpl.attribute_vertices_ >= 0) {
             glEnableVertexAttribArray(m_sessionImpl.attribute_vertices_);
-            //glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
-            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
+            //glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
         }
 
         if (m_sessionImpl.attribute_uvs_ >= 0) {
