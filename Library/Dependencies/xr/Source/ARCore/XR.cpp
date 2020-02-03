@@ -161,6 +161,9 @@ namespace xr
         float DepthNearZ{ DEFAULT_DEPTH_NEAR_Z };
         float DepthFarZ{ DEFAULT_DEPTH_FAR_Z };
         bool SessionEnded{ false };
+
+        EGLContext OriginalContext{};
+        EGLContext RenderContext{};
         EGLDisplay Display{};
         EGLSurface Surface{};
 
@@ -178,6 +181,7 @@ namespace xr
         {
             // graphicsContext is an EGLContext
             // grab and store the ANativeWindow pointer (the drawing surface)
+            OriginalContext = graphicsContext;
             Display = eglGetCurrentDisplay();
             Surface = eglGetCurrentSurface(EGL_DRAW);
             size_t width, height;
@@ -188,6 +192,20 @@ namespace xr
                 width = static_cast<size_t>(_width);
                 height = static_cast<size_t >(_height);
             }
+
+            EGLint attributes[] =
+            {
+                EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+                EGL_DEPTH_SIZE, 16,
+                EGL_STENCIL_SIZE, 8,
+                EGL_NONE
+            };
+
+            EGLConfig config;
+            EGLint numConfig = 0;
+            auto success = eglChooseConfig(Display, attributes, &config, 1, &numConfig);
+            RenderContext = eglCreateContext(Display, config, OriginalContext, nullptr);
+            //success = eglMakeCurrent(Display, Surface, Surface, RenderContext);
 
             // Allocate and store the render texture and camera texture
             GLuint colorTextureId;
@@ -219,6 +237,8 @@ namespace xr
             uniform_texture_ = glGetUniformLocation(shader_program_, "texture_color");
             attribute_vertices_ = glGetAttribLocation(shader_program_, "a_Position");
             attribute_uvs_ = glGetAttribLocation(shader_program_, "a_TexCoord");
+
+            //success = eglMakeCurrent(Display, Surface, Surface, OriginalContext);
 
             /*glGenVertexArrays(1, &vertexArray);
             glBindVertexArray(vertexArray);
@@ -283,18 +303,27 @@ namespace xr
         // (http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-14-render-to-texture/#using-the-rendered-texture)
 
         // Maybe need to cache and restore the current frame buffer after rendering (not sure)
-        GLint currentFrameBuffer;
+        /*GLint currentFrameBuffer;
         glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFrameBuffer);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);*/
 
         //glEnable(GL_BLEND);
         //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        auto success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.RenderContext);
+
+        glViewport(0, 0, Views[0].ColorTextureSize.Width, Views[0].ColorTextureSize.Height);
 
         glClearColor(0, 1, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
         //glLineWidth(5);
 
         //glBlitFrameBuffer
+
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
@@ -319,8 +348,12 @@ namespace xr
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         //glDrawArrays(GL_LINE_STRIP, 0, 4);
 
+        eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
+
         glUseProgram(0);
         glDepthMask(GL_TRUE);
+
+        success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.OriginalContext);
 
         // These are *not* changed when rendering to an off-screen frame buffer (rather than the default/on-screen frame buffer)
         //auto surface = eglGetCurrentSurface(EGL_DRAW);
@@ -329,6 +362,7 @@ namespace xr
         // Probably need to call eglSwapBuffers as this is what the simple example in the book does (https://learning.oreilly.com/library/view/advanced-androidtm-application/9780133892420/ch24.html#ch24lev2sec3)
         // The ARCore examples and the render_To_texture example do not do this
         // mEGL.eglSwapBuffers(display, surface);
+        int x = 5;
     }
 
     System::System(const char* appName)
