@@ -238,14 +238,38 @@ namespace xr
             attribute_vertices_ = glGetAttribLocation(shader_program_, "a_Position");
             attribute_uvs_ = glGetAttribLocation(shader_program_, "a_TexCoord");
 
-            //success = eglMakeCurrent(Display, Surface, Surface, OriginalContext);
+            //success = eglMakeCurrent(Display, Surface, Surface, RenderContext);
 
-            /*glGenVertexArrays(1, &vertexArray);
-            glBindVertexArray(vertexArray);
+            //glGenVertexArrays(1, &vertexArray);
+            //glBindVertexArray(vertexArray);
+
 
             glGenBuffers(1, &vertexBuffer);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vertexBuffer);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+
+            glGenVertexArrays(1, &vertexArray);
+            //success = eglMakeCurrent(Display, Surface, Surface, OriginalContext);
+
+            glBindVertexArray(vertexArray);
+
             glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);*/
+
+            if (attribute_vertices_ >= 0) {
+                glEnableVertexAttribArray(attribute_vertices_);
+                glVertexAttribPointer(attribute_vertices_, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat) * 2, 0);
+            }
+
+            if (attribute_uvs_ >= 0) {
+                glEnableVertexAttribArray(attribute_uvs_);
+                glVertexAttribPointer(attribute_uvs_, 2, GL_FLOAT, GL_FALSE, 0, kUVs);
+            }
+
+            glBindVertexArray(0); // vertex array is done
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
@@ -328,30 +352,40 @@ namespace xr
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
 
+        glBindVertexArray(m_sessionImpl.vertexArray);
+        glBindBuffer(GL_ARRAY_BUFFER, m_sessionImpl.vertexBuffer);
+
         if (m_sessionImpl.uniform_texture_ >= 0) {
             glUniform1i(m_sessionImpl.uniform_texture_, 1);
             glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, reinterpret_cast<GLuint>(Views[0].ColorTexturePointer));
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(reinterpret_cast<uint64_t>(Views[0].ColorTexturePointer)));
         }
 
-        if (m_sessionImpl.attribute_vertices_ >= 0) {
+        /*if (m_sessionImpl.attribute_vertices_ >= 0) {
+            // Move to init
             glEnableVertexAttribArray(m_sessionImpl.attribute_vertices_);
-            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
-            //glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+            // Move to init
+            //glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
+            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
         }
 
         if (m_sessionImpl.attribute_uvs_ >= 0) {
             glEnableVertexAttribArray(m_sessionImpl.attribute_uvs_);
             glVertexAttribPointer(m_sessionImpl.attribute_uvs_, 2, GL_FLOAT, GL_FALSE, 0, kUVs);
-        }
+        }*/
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         //glDrawArrays(GL_LINE_STRIP, 0, 4);
+
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
 
         glUseProgram(0);
         glDepthMask(GL_TRUE);
+
+        //glBindFramebuffer(GL_FRAMEBUFFER, currentFrameBuffer);
 
         success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.OriginalContext);
 
