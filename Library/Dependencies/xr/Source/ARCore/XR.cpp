@@ -9,7 +9,7 @@
 #include <EGL/egl.h>
 
 #include <android/native_window.h>
-
+#include <android/log.h>
 #include <arcore_c_api.h>
 
 #include <jni.h>
@@ -57,29 +57,26 @@ namespace xr
         const GLfloat kUVs[] =      { +0.0f, +0.0f, +1.0f, +0.0f, +0.0f, +1.0f, +1.0f, +1.0f, };
 
         constexpr char QUAD_VERT_SHADER[] = R"(
-            attribute vec4 a_Position;
-            attribute vec2 a_TexCoord;
-
-            varying vec2 v_TexCoord;
-
+            #version 300 es
+            precision highp float;
+            out vec2 v_TexCoord;
             void main() {
-                //gl_Position = vec4(a_Position, 0.0, 1.0);
-                gl_Position = a_Position;
-                v_TexCoord = a_TexCoord;
+                float x = -1.0 + float((gl_VertexID & 1) << 2);
+                float y = -1.0 + float((gl_VertexID & 2) << 1);
+                gl_Position = vec4(x, y, 0., 1.);
+                v_TexCoord = vec2(x+1.,y+1.) * 0.5;
             }
         )";
 
         const char QUAD_FRAG_SHADER[] = R"(
-            //#extension GL_OES_EGL_image_external : require
-
+            #version 300 es
             precision mediump float;
-            varying vec2 v_TexCoord;
-            //uniform samplerExternalOES sTexture;
+            in vec2 v_TexCoord;
             uniform sampler2D texture_color;
-
+            out vec4 oFragColor;
             void main() {
-                //gl_FragColor = texture2D(texture_color, v_TexCoord);
-                gl_FragColor = vec4(1.0,0.0,1.0,1.0);
+                vec4 texColor = texture(texture_color, v_TexCoord);
+                oFragColor = vec4(1.0,1.0,1.0,1.0) - texColor;
             }
         )";
 
@@ -109,6 +106,7 @@ namespace xr
                 }
 
                 glGetShaderInfoLog(shader, info_len, nullptr, buf);
+                __android_log_write(ANDROID_LOG_ERROR, "BabylonNative", buf);
                 // TODO: Throw exception
                 free(buf);
                 glDeleteShader(shader);
@@ -179,6 +177,7 @@ namespace xr
         Impl(System::Impl& hmdImpl, void* graphicsContext)
             : HmdImpl{ hmdImpl }
         {
+            
             // graphicsContext is an EGLContext
             // grab and store the ANativeWindow pointer (the drawing surface)
             OriginalContext = graphicsContext;
@@ -200,13 +199,16 @@ namespace xr
                 EGL_STENCIL_SIZE, 8,
                 EGL_NONE
             };
-
+/*
+            TODO cg: create a shared context, bind it for resources creation and bind original context before leaving function
             EGLConfig config;
             EGLint numConfig = 0;
+            bool success;
             auto success = eglChooseConfig(Display, attributes, &config, 1, &numConfig);
             RenderContext = eglCreateContext(Display, config, OriginalContext, nullptr);
-            //success = eglMakeCurrent(Display, Surface, Surface, RenderContext);
-
+            success = eglMakeCurrent(Display, Surface, Surface, RenderContext);
+            success = eglMakeCurrent(Display, Surface, Surface, OriginalContext);
+*/
             // Allocate and store the render texture and camera texture
             GLuint colorTextureId;
             glGenTextures(1, &colorTextureId);
@@ -234,24 +236,12 @@ namespace xr
 
             shader_program_ = CreateShaderProgram();
 
-            uniform_texture_ = glGetUniformLocation(shader_program_, "texture_color");
-            attribute_vertices_ = glGetAttribLocation(shader_program_, "a_Position");
-            attribute_uvs_ = glGetAttribLocation(shader_program_, "a_TexCoord");
-
-            //success = eglMakeCurrent(Display, Surface, Surface, OriginalContext);
-
-            /*glGenVertexArrays(1, &vertexArray);
-            glBindVertexArray(vertexArray);
-
-            glGenBuffers(1, &vertexBuffer);
-            glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);*/
-
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
 
             // This needs to be called from the UI thread (e.g. an Activity's onResume)
             //ArSession_create(g_env, g_appContext, &session);
+            
         }
 
         std::unique_ptr<System::Session::Frame> GetNextFrame(bool& shouldEndSession, bool& shouldRestartSession)
@@ -297,72 +287,39 @@ namespace xr
 
     System::Session::Frame::~Frame()
     {
-        // Probably draw to the xr surface here
-
-        // Maybe need to clear the frame buffer to tell it to draw to the screen (0 is the "default" frame buffer/the on-screen frame buffer)
-        // (http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-14-render-to-texture/#using-the-rendered-texture)
-
-        // Maybe need to cache and restore the current frame buffer after rendering (not sure)
-        /*GLint currentFrameBuffer;
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFrameBuffer);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);*/
-
-        //glEnable(GL_BLEND);
-        //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
+/*
+        TODO cg: bind gl context used for rendering
         auto success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.RenderContext);
-
+*/
+        GLint drawFboId;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &drawFboId);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, Views[0].ColorTextureSize.Width, Views[0].ColorTextureSize.Height);
 
         glClearColor(0, 1, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
-        //glLineWidth(5);
 
-        //glBlitFrameBuffer
-
-        glEnable(GL_CULL_FACE);
-        glEnable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
 
-        if (m_sessionImpl.uniform_texture_ >= 0) {
-            glUniform1i(m_sessionImpl.uniform_texture_, 1);
-            glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, reinterpret_cast<GLuint>(Views[0].ColorTexturePointer));
-        }
+        glActiveTexture(GL_TEXTURE0);
+        GLuint texId = (GLuint)(size_t)Views[0].ColorTexturePointer;
+        glBindTexture(GL_TEXTURE_2D, texId);
 
-        if (m_sessionImpl.attribute_vertices_ >= 0) {
-            glEnableVertexAttribArray(m_sessionImpl.attribute_vertices_);
-            glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, kVertices);
-            //glVertexAttribPointer(m_sessionImpl.attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
-        }
-
-        if (m_sessionImpl.attribute_uvs_ >= 0) {
-            glEnableVertexAttribArray(m_sessionImpl.attribute_uvs_);
-            glVertexAttribPointer(m_sessionImpl.attribute_uvs_, 2, GL_FLOAT, GL_FALSE, 0, kUVs);
-        }
-
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        //glDrawArrays(GL_LINE_STRIP, 0, 4);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
 
         eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
 
         glUseProgram(0);
         glDepthMask(GL_TRUE);
+        glBindFramebuffer(GL_FRAMEBUFFER, drawFboId);
 
-        success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.OriginalContext);
-
-        // These are *not* changed when rendering to an off-screen frame buffer (rather than the default/on-screen frame buffer)
-        //auto surface = eglGetCurrentSurface(EGL_DRAW);
-        //auto display = eglGetCurrentDisplay();
-
-        // Probably need to call eglSwapBuffers as this is what the simple example in the book does (https://learning.oreilly.com/library/view/advanced-androidtm-application/9780133892420/ch24.html#ch24lev2sec3)
-        // The ARCore examples and the render_To_texture example do not do this
-        // mEGL.eglSwapBuffers(display, surface);
-        int x = 5;
+        /* TODO CG: set back original gl context with eglMakeCurrent*/
     }
 
     System::System(const char* appName)
