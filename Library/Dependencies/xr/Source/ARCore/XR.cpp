@@ -18,8 +18,8 @@ extern ANativeWindow* xrWindow;
 extern uint32_t xrWindowWidth;
 extern uint32_t xrWindowHeight;
 
-/*extern JNIEnv* g_env;
-extern jobject g_appContext;*/
+extern JNIEnv* g_env;
+extern jobject g_appContext;
 
 namespace xr
 {
@@ -56,16 +56,23 @@ namespace xr
         const GLfloat kVertices[] = { -1.0f, -1.0f, +1.0f, -1.0f, -1.0f, +1.0f, +1.0f, +1.0f, };
         const GLfloat kUVs[] =      { +0.0f, +0.0f, +1.0f, +0.0f, +0.0f, +1.0f, +1.0f, +1.0f, };
 
-        constexpr char QUAD_VERT_SHADER[] = R"(
-            attribute vec4 a_Position;
-            attribute vec2 a_TexCoord;
+        constexpr char QUAD_VERT_SHADER[] = R"(#version 300 es
+            //attribute vec4 a_Position;
+            //attribute vec2 a_TexCoord;
 
-            varying vec2 v_TexCoord;
+            //varying vec2 v_TexCoord;
 
             void main() {
                 //gl_Position = vec4(a_Position, 0.0, 1.0);
-                gl_Position = a_Position;
-                v_TexCoord = a_TexCoord;
+                //gl_Position = a_Position;
+                const vec2 positions[4] = vec2[](
+                    vec2(-1, -1),
+                    vec2(+1, -1),
+                    vec2(-1, +1),
+                    vec2(+1, +1)
+                );
+                gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+                //v_TexCoord = a_TexCoord;
             }
         )";
 
@@ -73,9 +80,9 @@ namespace xr
             //#extension GL_OES_EGL_image_external : require
 
             precision mediump float;
-            varying vec2 v_TexCoord;
+            //varying vec2 v_TexCoord;
             //uniform samplerExternalOES sTexture;
-            uniform sampler2D texture_color;
+            //uniform sampler2D texture_color;
 
             void main() {
                 //gl_FragColor = texture2D(texture_color, v_TexCoord);
@@ -244,7 +251,7 @@ namespace xr
             //glBindVertexArray(vertexArray);
 
 
-            glGenBuffers(1, &vertexBuffer);
+            /*glGenBuffers(1, &vertexBuffer);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vertexBuffer);
             glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(kVertices), kVertices, GL_STATIC_DRAW);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -268,14 +275,15 @@ namespace xr
             }
 
             glBindVertexArray(0); // vertex array is done
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);*/
 
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
 
             // This needs to be called from the UI thread (e.g. an Activity's onResume)
-            //ArSession_create(g_env, g_appContext, &session);
+            ArStatus status = ArSession_create(g_env, g_appContext, &session);
+            int x = 5;
         }
 
         std::unique_ptr<System::Session::Frame> GetNextFrame(bool& shouldEndSession, bool& shouldRestartSession)
@@ -334,6 +342,10 @@ namespace xr
         //glEnable(GL_BLEND);
         //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+        GLuint vertexArray;
+        glGenVertexArrays(1, &vertexArray);
+        glBindVertexArray(vertexArray);
+
         auto success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.RenderContext);
 
         glViewport(0, 0, Views[0].ColorTextureSize.Width, Views[0].ColorTextureSize.Height);
@@ -352,8 +364,8 @@ namespace xr
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
 
-        glBindVertexArray(m_sessionImpl.vertexArray);
-        glBindBuffer(GL_ARRAY_BUFFER, m_sessionImpl.vertexBuffer);
+        /*glBindVertexArray(m_sessionImpl.vertexArray);
+        glBindBuffer(GL_ARRAY_BUFFER, m_sessionImpl.vertexBuffer);*/
 
         if (m_sessionImpl.uniform_texture_ >= 0) {
             glUniform1i(m_sessionImpl.uniform_texture_, 1);
@@ -377,9 +389,6 @@ namespace xr
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         //glDrawArrays(GL_LINE_STRIP, 0, 4);
 
-        glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-
         eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
 
         glUseProgram(0);
@@ -388,6 +397,10 @@ namespace xr
         //glBindFramebuffer(GL_FRAMEBUFFER, currentFrameBuffer);
 
         success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.OriginalContext);
+
+        glBindVertexArray(0);
+        //glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glDeleteVertexArrays(1, &vertexArray);
 
         // These are *not* changed when rendering to an off-screen frame buffer (rather than the default/on-screen frame buffer)
         //auto surface = eglGetCurrentSurface(EGL_DRAW);

@@ -14,7 +14,7 @@
 #include <InputManager.h>
 
 extern "C" {
-JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_initEngine(JNIEnv* env, jobject obj, jobject assetMgr);
+JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_initEngine(JNIEnv* env, jobject obj, jobject assetMgr, jobject appContext);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_finishEngine(JNIEnv* env, jobject obj);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_surfaceCreated(JNIEnv* env, jobject obj, jobject surface);
 JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_activityOnPause(JNIEnv* env);
@@ -29,6 +29,8 @@ JNIEXPORT void JNICALL Java_BabylonNative_Wrapper_setTouchInfo(JNIEnv* env, jobj
 ANativeWindow* xrWindow{};
 uint32_t xrWindowWidth{};
 uint32_t xrWindowHeight{};
+
+jobject g_appContext{};
 
 std::unique_ptr<Babylon::RuntimeAndroid> runtime{};
 std::unique_ptr<InputManager::InputBuffer> inputBuffer{};
@@ -69,8 +71,10 @@ Java_BabylonNative_Wrapper_xrSurfaceChanged(JNIEnv* env, jobject obj, jint width
 
 JNIEXPORT void JNICALL
 Java_BabylonNative_Wrapper_initEngine(JNIEnv* env, jobject obj,
-                                      jobject assetMgr)
+                                      jobject assetMgr, jobject appContext)
 {
+    ::g_appContext = env->NewGlobalRef(appContext);
+
     auto asset_manager = AAssetManager_fromJava(env, assetMgr);
     g_assetMgrNative = asset_manager;
     jboolean iscopy;
@@ -79,6 +83,7 @@ Java_BabylonNative_Wrapper_initEngine(JNIEnv* env, jobject obj,
 JNIEXPORT void JNICALL
 Java_BabylonNative_Wrapper_finishEngine(JNIEnv* env, jobject obj)
 {
+    // TODO: detach jvm
 }
 
 JNIEXPORT void JNICALL
@@ -86,31 +91,34 @@ Java_BabylonNative_Wrapper_surfaceCreated(JNIEnv* env, jobject obj, jobject surf
 {
     if (!runtime)
     {
+        JavaVM* javaVM{};
+        auto result = env->GetJavaVM(&javaVM);// validate result is JNI_OK
+
         ANativeWindow *window = ANativeWindow_fromSurface(env, surface);
 
         int32_t width  = ANativeWindow_getWidth(window);
         int32_t height = ANativeWindow_getHeight(window);
 
-        runtime = std::make_unique<Babylon::RuntimeAndroid>(window, Root, width, height, GetAssetContents);
+        runtime = std::make_unique<Babylon::RuntimeAndroid>(javaVM, window, Root, width, height, GetAssetContents);
 
         runtime->Dispatch([](Babylon::Env& env)
-                          {
-                              Babylon::Console::CreateInstance(env, [](const char* message, Babylon::Console::LogLevel level)
-                              {
-                                  switch (level)
-                                  {
-                                      case Babylon::Console::LogLevel::Log:
-                                          __android_log_write(ANDROID_LOG_INFO, "BabylonNative", message);
-                                          break;
-                                      case Babylon::Console::LogLevel::Warn:
-                                          __android_log_write(ANDROID_LOG_WARN, "BabylonNative", message);
-                                          break;
-                                      case Babylon::Console::LogLevel::Error:
-                                          __android_log_write(ANDROID_LOG_ERROR, "BabylonNative", message);
-                                          break;
-                                  }
-                              });
-                          });
+        {
+          Babylon::Console::CreateInstance(env, [](const char* message, Babylon::Console::LogLevel level)
+          {
+              switch (level)
+              {
+                  case Babylon::Console::LogLevel::Log:
+                      __android_log_write(ANDROID_LOG_INFO, "BabylonNative", message);
+                      break;
+                  case Babylon::Console::LogLevel::Warn:
+                      __android_log_write(ANDROID_LOG_WARN, "BabylonNative", message);
+                      break;
+                  case Babylon::Console::LogLevel::Error:
+                      __android_log_write(ANDROID_LOG_ERROR, "BabylonNative", message);
+                      break;
+              }
+          });
+        });
 
         inputBuffer = std::make_unique<InputManager::InputBuffer>(*runtime);
         InputManager::Initialize(*runtime, *inputBuffer);

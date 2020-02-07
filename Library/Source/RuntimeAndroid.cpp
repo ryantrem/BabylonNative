@@ -4,17 +4,24 @@
 #include "NativeEngine.h"
 #include "NativeXr.h"
 
+JNIEnv* g_env;
+
 namespace Babylon
 {
+    namespace
+    {
+        JavaVM* g_javaVM{};
+    }
 
-    RuntimeAndroid::RuntimeAndroid(ANativeWindow* nativeWindowPtr, float width, float height, ResourceLoadingCallback resourceLoadingCallback)
-        : RuntimeAndroid{nativeWindowPtr, ".", width, height, std::move(resourceLoadingCallback)} // todo : GetModulePath().parent_path() std::fs experimental not available with ndk
+    RuntimeAndroid::RuntimeAndroid(JavaVM* javaVM, ANativeWindow* nativeWindowPtr, float width, float height, ResourceLoadingCallback resourceLoadingCallback)
+        : RuntimeAndroid{javaVM, nativeWindowPtr, ".", width, height, std::move(resourceLoadingCallback)} // todo : GetModulePath().parent_path() std::fs experimental not available with ndk
     {
     }
 
-    RuntimeAndroid::RuntimeAndroid(ANativeWindow* nativeWindowPtr, const std::string& rootUrl, float width, float height, ResourceLoadingCallback resourceLoadingCallback)
+    RuntimeAndroid::RuntimeAndroid(JavaVM* javaVM, ANativeWindow* nativeWindowPtr, const std::string& rootUrl, float width, float height, ResourceLoadingCallback resourceLoadingCallback)
         : Runtime{std::make_unique<RuntimeImpl>(nativeWindowPtr, rootUrl, std::move(resourceLoadingCallback))}
     {
+        g_javaVM = javaVM;
         //NativeEngine::InitializeWindow(nativeWindowPtr, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
     }
 
@@ -25,10 +32,14 @@ namespace Babylon
 
     void RuntimeImpl::ThreadProcedure()
     {
+        auto result = g_javaVM->AttachCurrentThread(&g_env, nullptr);
+
         this->Dispatch([](Env& env) {
             InitializeNativeXr(env);
         });
 
         RuntimeImpl::BaseThreadProcedure();
+
+        g_javaVM->DetachCurrentThread();
     }
 }
