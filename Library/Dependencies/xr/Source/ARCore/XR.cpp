@@ -156,6 +156,7 @@ namespace xr
     public:
         const System::Impl& HmdImpl;
         std::vector<Frame::View> ActiveFrameViews{ {} };
+        std::vector<Frame::InputSource> InputSources;
         float DepthNearZ{ DEFAULT_DEPTH_NEAR_Z };
         float DepthFarZ{ DEFAULT_DEPTH_FAR_Z };
         bool SessionEnded{ false };
@@ -268,13 +269,14 @@ namespace xr
     System::Session::Frame::Frame(Session::Impl& sessionImpl)
         : Views{ sessionImpl.ActiveFrameViews }
         , m_sessionImpl{ sessionImpl }
+        , InputSources{ sessionImpl.InputSources}
     {
         Views[0].DepthNearZ = sessionImpl.DepthNearZ;
         Views[0].DepthFarZ = sessionImpl.DepthFarZ;
 
-        Views[0].Position = {0, 0, -10};
+        Views[0].Space.Position = {0, 0, -10};
         // https://quaternions.online/
-        Views[0].Orientation = {0.707f, 0, -.707f, 0};
+        Views[0].Space.Orientation = {0.707f, 0, -.707f, 0};
         Views[0].FieldOfView.AngleLeft = 0.4;
         Views[0].FieldOfView.AngleRight = 0.4;
         Views[0].FieldOfView.AngleUp = 0.4;

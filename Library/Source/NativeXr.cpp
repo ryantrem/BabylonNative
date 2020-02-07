@@ -502,11 +502,11 @@ namespace Babylon
                 pos.Set("z", space.Position.Z);
                 pos.Set("w", 1.f);
 
-                auto or = m_orientation.Value();
-                or.Set("x", space.Orientation.X);
-                or.Set("y", space.Orientation.Y);
-                or.Set("z", space.Orientation.Z);
-                or.Set("w", space.Orientation.W);
+                auto orientation = m_orientation.Value();
+                orientation.Set("x", space.Orientation.X);
+                orientation.Set("y", space.Orientation.Y);
+                orientation.Set("z", space.Orientation.Z);
+                orientation.Set("w", space.Orientation.W);
 
                 std::memcpy(m_matrix.Value().Data(), CreateTransformMatrix(space, isViewSpace).data(), m_matrix.Value().ByteLength());
             }
@@ -978,7 +978,8 @@ namespace Babylon
                     else
                     {
                         // Ensure the correct spaces are associated with the existing input source.
-                        SetXRInputSourceSpaces(found->second.Value(), inputSource);
+                        auto val = found->second.Value();
+                        SetXRInputSourceSpaces(val, inputSource);
                     }
                 }
                 for (const auto& [id, ref] : m_idToInputSource)
