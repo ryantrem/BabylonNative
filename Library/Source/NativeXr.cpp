@@ -288,10 +288,10 @@ namespace Babylon
                 assert(view.ColorTextureSize.Height == view.DepthTextureSize.Height);
 
                 auto colorTextureFormat = XrTextureFormatToBgfxFormat(view.ColorTextureFormat);
-                auto colorTex = bgfx::createTexture2D(1, 1, false, 1, colorTextureFormat, BGFX_TEXTURE_RT);
+                auto colorTex = bgfx::createTexture2D(view.ColorTextureSize.Width, view.ColorTextureSize.Height, false, 1, colorTextureFormat, BGFX_TEXTURE_RT);
 
                 auto depthTextureFormat = XrTextureFormatToBgfxFormat(view.DepthTextureFormat);
-                auto depthTex = bgfx::createTexture2D(1, 1, false, 1, depthTextureFormat, BGFX_TEXTURE_RT);
+                auto depthTex = bgfx::createTexture2D(view.DepthTextureSize.Width, view.DepthTextureSize.Height, false, 1, depthTextureFormat, BGFX_TEXTURE_RT);
 
                 // Force BGFX to create the texture now, which is necessary in order to use overrideInternal.
                 bgfx::frame();

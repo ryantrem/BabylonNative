@@ -14,6 +14,13 @@
 
 #include <jni.h>
 
+#define GLM_FORCE_RADIANS 1
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm.hpp>
+#include <gtc/matrix_transform.hpp>
+#include <gtc/type_ptr.hpp>
+#include <gtx/quaternion.hpp>
+
 extern ANativeWindow* xrWindow;
 extern uint32_t xrWindowWidth;
 extern uint32_t xrWindowHeight;
@@ -60,10 +67,14 @@ namespace xr
             precision highp float;
             out vec2 v_TexCoord;
             void main() {
-                float x = -1.0 + float((gl_VertexID & 1) << 2);
-                float y = -1.0 + float((gl_VertexID & 2) << 1);
-                gl_Position = vec4(x, y, 0., 1.);
-                v_TexCoord = vec2(x+1.,y+1.) * 0.5;
+                const vec2 positions[4] = vec2[](
+                    vec2(-1, -1),
+                    vec2(+1, -1),
+                    vec2(-1, +1),
+                    vec2(+1, +1)
+                );
+                gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+                v_TexCoord = vec2(gl_Position.x + 1.0, gl_Position.y + 1.0) * 0.5;
             }
         )";
 
@@ -74,7 +85,9 @@ namespace xr
             out vec4 oFragColor;
             void main() {
                 vec4 texColor = texture(texture_color, v_TexCoord);
-                oFragColor = vec4(1.0,1.0,1.0,1.0) - texColor;
+                oFragColor = texColor;
+                //oFragColor = vec4(1.0,1.0,1.0,1.0) - texColor;
+                //oFragColor = vec4(v_TexCoord.x, v_TexCoord.y, 0.0, 1.0);
             }
         )";
 
@@ -171,7 +184,14 @@ namespace xr
         GLuint vertexArray;
         GLuint vertexBuffer;
 
-        ArSession* session;
+        GLuint cameraTextureId{};
+
+        ArSession* session{};
+        ArFrame* frame{};
+        ArPose* pose{};
+
+        float transformed_uvs[8];
+        bool uvs_initialized{false};
 
         Impl(System::Impl& hmdImpl, void* graphicsContext)
             : HmdImpl{ hmdImpl }
@@ -233,6 +253,11 @@ namespace xr
             ActiveFrameViews[0].DepthTextureFormat = TextureFormat::D24S8;
             ActiveFrameViews[0].DepthTextureSize = {width, height};
 
+            glGenTextures(1, &cameraTextureId);
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
             shader_program_ = CreateShaderProgram();
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
@@ -240,14 +265,29 @@ namespace xr
 
             // This needs to be called from the UI thread (e.g. an Activity's onResume)
             ArStatus status = ArSession_create(g_env, g_appContext, &session);
+            ArFrame_create(session, &frame);
+            ArPose_create(session, nullptr, &pose);
+            ArSession_setDisplayGeometry(session, 0, static_cast<int32_t>(width), static_cast<int32_t>(height));
+            status = ArSession_resume(session);
             int x = 5;
+        }
+
+        ~Impl()
+        {
+            ArPose_destroy(pose);
+            ArFrame_destroy(frame);
+            ArSession_destroy(session);
         }
 
         std::unique_ptr<System::Session::Frame> GetNextFrame(bool& shouldEndSession, bool& shouldRestartSession)
         {
             shouldEndSession = SessionEnded;
             shouldRestartSession = false;
+
             // Call ArSession_setCameraTextureName and ArSession_update
+            ArSession_setCameraTextureName(session, static_cast<uint32_t>(cameraTextureId));
+            ArSession_update(session, frame);
+
             return std::make_unique<Frame>(*this);
         }
 
@@ -272,17 +312,70 @@ namespace xr
         Views[0].DepthNearZ = sessionImpl.DepthNearZ;
         Views[0].DepthFarZ = sessionImpl.DepthFarZ;
 
-        Views[0].Space.Position = {0, 0, -10};
+        /*Views[0].Space.Position = {0, 0, -10};
         // https://quaternions.online/
         Views[0].Space.Orientation = {0.707f, 0, -.707f, 0};
         Views[0].FieldOfView.AngleLeft = 0.4;
         Views[0].FieldOfView.AngleRight = 0.4;
         Views[0].FieldOfView.AngleUp = 0.4;
-        Views[0].FieldOfView.AngleDown = 0.4;
+        Views[0].FieldOfView.AngleDown = 0.4;*/
 
         // Call ArFrame_acquireCamera 
         // Call ArCamera_getPose and ArCamera_getProjectionMatrix and mash state into the single View (from Views)
         // Call ArCamera_release
+
+        ArCamera* camera;
+        ArFrame_acquireCamera(sessionImpl.session, sessionImpl.frame, &camera);
+
+        {
+            float rawPose[7];
+            //ArCamera_getPose(sessionImpl.session, camera, sessionImpl.pose);
+            ArCamera_getDisplayOrientedPose(sessionImpl.session, camera, sessionImpl.pose);
+            ArPose_getPoseRaw(sessionImpl.session, sessionImpl.pose, rawPose);
+
+            Views[0].Space.Orientation = {rawPose[0], rawPose[1], rawPose[2], rawPose[3]};
+            Views[0].Space.Position = {rawPose[4], rawPose[5], rawPose[6]};
+        }
+
+        {
+            glm::mat4 projection_mat;
+            ArCamera_getProjectionMatrix(sessionImpl.session, camera, Views[0].DepthNearZ, Views[0].DepthFarZ, glm::value_ptr(projection_mat));
+
+            float a = projection_mat[0][0];
+            float b = projection_mat[1][1];
+
+            float aspect_ratio = b / a;
+
+            float RAD2DEG = 180.0f / 3.14159265358979323846f;
+            //float fov = RAD2DEG * (2.0f * std::atan(1.0f / b));
+            float fov = std::atan(1.0f / b);
+
+            Views[0].FieldOfView.AngleUp = Views[0].FieldOfView.AngleDown = fov;
+            Views[0].FieldOfView.AngleLeft = Views[0].FieldOfView.AngleRight = fov * aspect_ratio;
+
+            // TODO: Seems like projection matrix is not being reconstructed correctly from this in NativeXR.cpp#56
+        }
+
+        ArTrackingState camera_tracking_state;
+        ArCamera_getTrackingState(sessionImpl.session, camera, &camera_tracking_state);
+
+        if (camera_tracking_state == ArTrackingState::AR_TRACKING_STATE_TRACKING)
+        {
+            __android_log_write(ANDROID_LOG_DEBUG, "BabylonNative", "Tracking");
+
+            int32_t geometry_changed = 0;
+            ArFrame_getDisplayGeometryChanged(sessionImpl.session, sessionImpl.frame, &geometry_changed);
+            if (geometry_changed != 0 || !sessionImpl.uvs_initialized)
+            {
+                ArFrame_transformCoordinates2d(
+                        sessionImpl.session, sessionImpl.frame, AR_COORDINATES_2D_OPENGL_NORMALIZED_DEVICE_COORDINATES,
+                        4, kVertices, AR_COORDINATES_2D_TEXTURE_NORMALIZED,
+                        sessionImpl.transformed_uvs);
+                sessionImpl.uvs_initialized = true;
+            }
+        }
+
+        ArCamera_release(camera);
     }
 
     System::Session::Frame::~Frame()
@@ -307,11 +400,15 @@ namespace xr
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
 
+        //auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_color");
+        //glUniform1i(uniform_texture_, 0);
         glActiveTexture(GL_TEXTURE0);
-        GLuint texId = (GLuint)(size_t)Views[0].ColorTexturePointer;
-        glBindTexture(GL_TEXTURE_2D, texId);
+        /*GLuint texId = (GLuint)(size_t)Views[0].ColorTexturePointer;
+        glBindTexture(GL_TEXTURE_2D, texId);*/
+        // TODO: Use sessionImpl::transformed_uvs
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
 
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
 

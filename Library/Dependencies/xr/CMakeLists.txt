@@ -25,8 +25,6 @@ add_library(xr ${SOURCES})
 
 target_compile_definitions(xr PRIVATE _CRT_SECURE_NO_WARNINGS)
 
-target_include_directories(xr PRIVATE "Dependencies/OpenXR-SDK/include")
-
 if (ANDROID)
     add_library(arcore SHARED IMPORTED)
     set_target_properties(arcore PROPERTIES IMPORTED_LOCATION
