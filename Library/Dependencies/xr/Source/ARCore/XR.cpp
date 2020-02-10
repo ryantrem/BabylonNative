@@ -65,7 +65,9 @@ namespace xr
 
         constexpr char QUAD_VERT_SHADER[] = R"(#version 300 es
             precision highp float;
-            out vec2 v_TexCoord;
+            uniform vec2 cameraTexCoord[4];
+            out vec2 v_CameraTexCoord;
+            out vec2 v_BabylonTexCoord;
             void main() {
                 const vec2 positions[4] = vec2[](
                     vec2(-1, -1),
@@ -74,20 +76,23 @@ namespace xr
                     vec2(+1, +1)
                 );
                 gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
-                v_TexCoord = vec2(gl_Position.x + 1.0, gl_Position.y + 1.0) * 0.5;
+                //v_CameraTexCoord = vec2(gl_Position.x + 1.0, gl_Position.y + 1.0) * 0.5;
+                v_CameraTexCoord = cameraTexCoord[gl_VertexID];
+                v_BabylonTexCoord = vec2(gl_Position.x + 1.0, gl_Position.y + 1.0) * 0.5;
             }
         )";
 
         const char QUAD_FRAG_SHADER[] = R"(#version 300 es
             precision mediump float;
-            in vec2 v_TexCoord;
-            uniform sampler2D texture_color;
+            in vec2 v_CameraTexCoord;
+            uniform samplerExternalOES texture_camera;
+            uniform sampler2D texture_babylon;
             out vec4 oFragColor;
             void main() {
-                vec4 texColor = texture(texture_color, v_TexCoord);
-                oFragColor = texColor;
-                //oFragColor = vec4(1.0,1.0,1.0,1.0) - texColor;
-                //oFragColor = vec4(v_TexCoord.x, v_TexCoord.y, 0.0, 1.0);
+                vec4 cameraTexColor = texture(texture_camera, v_CameraTexCoord);
+                oFragColor = cameraTexColor;
+                //oFragColor = vec4(1.0,1.0,1.0,1.0) - cameraTexColor;
+                //oFragColor = vec4(v_CameraTexCoord.x, v_CameraTexCoord.y, 0.0, 1.0);
             }
         )";
 
@@ -400,13 +405,16 @@ namespace xr
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
 
-        //auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_color");
-        //glUniform1i(uniform_texture_, 0);
+        auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_camera");
+        glUniform1i(uniform_texture_, 0);
         glActiveTexture(GL_TEXTURE0);
         /*GLuint texId = (GLuint)(size_t)Views[0].ColorTexturePointer;
         glBindTexture(GL_TEXTURE_2D, texId);*/
         // TODO: Use sessionImpl::transformed_uvs
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
+
+        auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_, "cameraTexCoord");
+        glUniform2fv(uniform_uvs, 4, m_sessionImpl.transformed_uvs);
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
