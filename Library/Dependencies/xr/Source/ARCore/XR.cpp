@@ -83,14 +83,18 @@ namespace xr
         )";
 
         const char QUAD_FRAG_SHADER[] = R"(#version 300 es
+            #extension GL_OES_EGL_image_external_essl3 : require
             precision mediump float;
             in vec2 v_CameraTexCoord;
+            in vec2 v_BabylonTexCoord;
             uniform samplerExternalOES texture_camera;
             uniform sampler2D texture_babylon;
             out vec4 oFragColor;
             void main() {
                 vec4 cameraTexColor = texture(texture_camera, v_CameraTexCoord);
-                oFragColor = cameraTexColor;
+                vec4 babylonTexColor = texture(texture_babylon, v_BabylonTexCoord);
+                //oFragColor = cameraTexColor;
+                oFragColor = mix(cameraTexColor, babylonTexColor, babylonTexColor.a);
                 //oFragColor = vec4(1.0,1.0,1.0,1.0) - cameraTexColor;
                 //oFragColor = vec4(v_CameraTexCoord.x, v_CameraTexCoord.y, 0.0, 1.0);
             }
@@ -408,13 +412,19 @@ namespace xr
         auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_camera");
         glUniform1i(uniform_texture_, 0);
         glActiveTexture(GL_TEXTURE0);
-        /*GLuint texId = (GLuint)(size_t)Views[0].ColorTexturePointer;
-        glBindTexture(GL_TEXTURE_2D, texId);*/
-        // TODO: Use sessionImpl::transformed_uvs
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
 
         auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_, "cameraTexCoord");
         glUniform2fv(uniform_uvs, 4, m_sessionImpl.transformed_uvs);
+
+        auto uniform_texture_babylon = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_babylon");
+        if (uniform_texture_babylon >= 0)
+        {
+            glUniform1i(uniform_texture_babylon, 1);
+            glActiveTexture(GL_TEXTURE1);
+            auto texId = (GLuint) (size_t) Views[0].ColorTexturePointer;
+            glBindTexture(GL_TEXTURE_2D, texId);
+        }
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
