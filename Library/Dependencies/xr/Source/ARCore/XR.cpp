@@ -14,12 +14,19 @@
 
 #include <jni.h>
 
+#define GLM_FORCE_RADIANS 1
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm.hpp>
+#include <gtc/matrix_transform.hpp>
+#include <gtc/type_ptr.hpp>
+#include <gtx/quaternion.hpp>
+
 extern ANativeWindow* xrWindow;
 extern uint32_t xrWindowWidth;
 extern uint32_t xrWindowHeight;
 
-/*extern JNIEnv* g_env;
-extern jobject g_appContext;*/
+extern JNIEnv* g_env;
+extern jobject g_appContext;
 
 namespace xr
 {
@@ -56,27 +63,40 @@ namespace xr
         const GLfloat kVertices[] = { -1.0f, -1.0f, +1.0f, -1.0f, -1.0f, +1.0f, +1.0f, +1.0f, };
         const GLfloat kUVs[] =      { +0.0f, +0.0f, +1.0f, +0.0f, +0.0f, +1.0f, +1.0f, +1.0f, };
 
-        constexpr char QUAD_VERT_SHADER[] = R"(
-            #version 300 es
+        constexpr char QUAD_VERT_SHADER[] = R"(#version 300 es
             precision highp float;
-            out vec2 v_TexCoord;
+            uniform vec2 cameraTexCoord[4];
+            out vec2 v_CameraTexCoord;
+            out vec2 v_BabylonTexCoord;
             void main() {
-                float x = -1.0 + float((gl_VertexID & 1) << 2);
-                float y = -1.0 + float((gl_VertexID & 2) << 1);
-                gl_Position = vec4(x, y, 0., 1.);
-                v_TexCoord = vec2(x+1.,y+1.) * 0.5;
+                const vec2 positions[4] = vec2[](
+                    vec2(-1, -1),
+                    vec2(+1, -1),
+                    vec2(-1, +1),
+                    vec2(+1, +1)
+                );
+                gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+                //v_CameraTexCoord = vec2(gl_Position.x + 1.0, gl_Position.y + 1.0) * 0.5;
+                v_CameraTexCoord = cameraTexCoord[gl_VertexID];
+                v_BabylonTexCoord = vec2(gl_Position.x + 1.0, gl_Position.y + 1.0) * 0.5;
             }
         )";
 
-        const char QUAD_FRAG_SHADER[] = R"(
-            #version 300 es
+        const char QUAD_FRAG_SHADER[] = R"(#version 300 es
+            #extension GL_OES_EGL_image_external_essl3 : require
             precision mediump float;
-            in vec2 v_TexCoord;
-            uniform sampler2D texture_color;
+            in vec2 v_CameraTexCoord;
+            in vec2 v_BabylonTexCoord;
+            uniform samplerExternalOES texture_camera;
+            uniform sampler2D texture_babylon;
             out vec4 oFragColor;
             void main() {
-                vec4 texColor = texture(texture_color, v_TexCoord);
-                oFragColor = vec4(1.0,1.0,1.0,1.0) - texColor;
+                vec4 cameraTexColor = texture(texture_camera, v_CameraTexCoord);
+                vec4 babylonTexColor = texture(texture_babylon, v_BabylonTexCoord);
+                //oFragColor = cameraTexColor;
+                oFragColor = mix(cameraTexColor, babylonTexColor, babylonTexColor.a);
+                //oFragColor = vec4(1.0,1.0,1.0,1.0) - cameraTexColor;
+                //oFragColor = vec4(v_CameraTexCoord.x, v_CameraTexCoord.y, 0.0, 1.0);
             }
         )";
 
@@ -173,7 +193,14 @@ namespace xr
         GLuint vertexArray;
         GLuint vertexBuffer;
 
-        ArSession* session;
+        GLuint cameraTextureId{};
+
+        ArSession* session{};
+        ArFrame* frame{};
+        ArPose* pose{};
+
+        float transformed_uvs[8];
+        bool uvs_initialized{false};
 
         Impl(System::Impl& hmdImpl, void* graphicsContext)
             : HmdImpl{ hmdImpl }
@@ -214,7 +241,7 @@ namespace xr
             GLuint colorTextureId;
             glGenTextures(1, &colorTextureId);
             glBindTexture(GL_TEXTURE_2D, colorTextureId);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glBindTexture(GL_TEXTURE_2D, 0);
@@ -235,21 +262,41 @@ namespace xr
             ActiveFrameViews[0].DepthTextureFormat = TextureFormat::D24S8;
             ActiveFrameViews[0].DepthTextureSize = {width, height};
 
+            glGenTextures(1, &cameraTextureId);
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
             shader_program_ = CreateShaderProgram();
 
             // Call ArCoreApk_requestInstall, and possibly throw an exception if the user declines ArCore installation
             // Call ArSession_create and ArFrame_create and ArSession_setDisplayGeometry, and probably ArSession_resume
 
             // This needs to be called from the UI thread (e.g. an Activity's onResume)
-            //ArSession_create(g_env, g_appContext, &session);
-            
+            ArStatus status = ArSession_create(g_env, g_appContext, &session);
+            ArFrame_create(session, &frame);
+            ArPose_create(session, nullptr, &pose);
+            ArSession_setDisplayGeometry(session, 0, static_cast<int32_t>(width), static_cast<int32_t>(height));
+            status = ArSession_resume(session);
+            int x = 5;
+        }
+
+        ~Impl()
+        {
+            ArPose_destroy(pose);
+            ArFrame_destroy(frame);
+            ArSession_destroy(session);
         }
 
         std::unique_ptr<System::Session::Frame> GetNextFrame(bool& shouldEndSession, bool& shouldRestartSession)
         {
             shouldEndSession = SessionEnded;
             shouldRestartSession = false;
+
             // Call ArSession_setCameraTextureName and ArSession_update
+            ArSession_setCameraTextureName(session, static_cast<uint32_t>(cameraTextureId));
+            ArSession_update(session, frame);
+
             return std::make_unique<Frame>(*this);
         }
 
@@ -274,17 +321,70 @@ namespace xr
         Views[0].DepthNearZ = sessionImpl.DepthNearZ;
         Views[0].DepthFarZ = sessionImpl.DepthFarZ;
 
-        Views[0].Space.Position = {0, 0, -10};
+        /*Views[0].Space.Position = {0, 0, -10};
         // https://quaternions.online/
         Views[0].Space.Orientation = {0.707f, 0, -.707f, 0};
         Views[0].FieldOfView.AngleLeft = 0.4;
         Views[0].FieldOfView.AngleRight = 0.4;
         Views[0].FieldOfView.AngleUp = 0.4;
-        Views[0].FieldOfView.AngleDown = 0.4;
+        Views[0].FieldOfView.AngleDown = 0.4;*/
 
         // Call ArFrame_acquireCamera 
         // Call ArCamera_getPose and ArCamera_getProjectionMatrix and mash state into the single View (from Views)
         // Call ArCamera_release
+
+        ArCamera* camera;
+        ArFrame_acquireCamera(sessionImpl.session, sessionImpl.frame, &camera);
+
+        {
+            float rawPose[7];
+            //ArCamera_getPose(sessionImpl.session, camera, sessionImpl.pose);
+            ArCamera_getDisplayOrientedPose(sessionImpl.session, camera, sessionImpl.pose);
+            ArPose_getPoseRaw(sessionImpl.session, sessionImpl.pose, rawPose);
+
+            Views[0].Space.Orientation = {rawPose[0], rawPose[1], rawPose[2], rawPose[3]};
+            Views[0].Space.Position = {rawPose[4], rawPose[5], rawPose[6]};
+        }
+
+        {
+            glm::mat4 projection_mat;
+            ArCamera_getProjectionMatrix(sessionImpl.session, camera, Views[0].DepthNearZ, Views[0].DepthFarZ, glm::value_ptr(projection_mat));
+
+            float a = projection_mat[0][0];
+            float b = projection_mat[1][1];
+
+            float aspect_ratio = b / a;
+
+            float RAD2DEG = 180.0f / 3.14159265358979323846f;
+            //float fov = RAD2DEG * (2.0f * std::atan(1.0f / b));
+            float fov = std::atan(1.0f / b);
+
+            Views[0].FieldOfView.AngleUp = Views[0].FieldOfView.AngleDown = fov;
+            Views[0].FieldOfView.AngleLeft = Views[0].FieldOfView.AngleRight = fov * aspect_ratio;
+
+            // TODO: Seems like projection matrix is not being reconstructed correctly from this in NativeXR.cpp#56
+        }
+
+        ArTrackingState camera_tracking_state;
+        ArCamera_getTrackingState(sessionImpl.session, camera, &camera_tracking_state);
+
+        if (camera_tracking_state == ArTrackingState::AR_TRACKING_STATE_TRACKING)
+        {
+            __android_log_write(ANDROID_LOG_DEBUG, "BabylonNative", "Tracking");
+
+            int32_t geometry_changed = 0;
+            ArFrame_getDisplayGeometryChanged(sessionImpl.session, sessionImpl.frame, &geometry_changed);
+            if (geometry_changed != 0 || !sessionImpl.uvs_initialized)
+            {
+                ArFrame_transformCoordinates2d(
+                        sessionImpl.session, sessionImpl.frame, AR_COORDINATES_2D_OPENGL_NORMALIZED_DEVICE_COORDINATES,
+                        4, kVertices, AR_COORDINATES_2D_TEXTURE_NORMALIZED,
+                        sessionImpl.transformed_uvs);
+                sessionImpl.uvs_initialized = true;
+            }
+        }
+
+        ArCamera_release(camera);
     }
 
     System::Session::Frame::~Frame()
@@ -295,6 +395,16 @@ namespace xr
 */
         GLint drawFboId;
         glGetIntegerv(GL_FRAMEBUFFER_BINDING, &drawFboId);
+        GLfloat old_clearColor[4];
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, old_clearColor);
+        GLboolean old_glCullFace = glIsEnabled(GL_CULL_FACE);
+        GLboolean old_glDepthTest = glIsEnabled(GL_DEPTH_TEST);
+        GLboolean old_glBlend = glIsEnabled(GL_BLEND);
+        GLboolean old_glDepthMask;
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &old_glDepthMask);
+        GLint old_glBlendFunc;
+        glGetIntegerv(GL_BLEND_SRC_ALPHA, &old_glBlendFunc);
+
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, Views[0].ColorTextureSize.Width, Views[0].ColorTextureSize.Height);
 
@@ -309,17 +419,49 @@ namespace xr
         glUseProgram(m_sessionImpl.shader_program_);
         glDepthMask(GL_FALSE);
 
+        auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_camera");
+        glUniform1i(uniform_texture_, 0);
         glActiveTexture(GL_TEXTURE0);
-        GLuint texId = (GLuint)(size_t)Views[0].ColorTexturePointer;
-        glBindTexture(GL_TEXTURE_2D, texId);
+        GLint old_texture0Binding;
+        glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &old_texture0Binding);
+        glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
 
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 3);
+        auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_, "cameraTexCoord");
+        glUniform2fv(uniform_uvs, 4, m_sessionImpl.transformed_uvs);
+
+        auto uniform_texture_babylon = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_babylon");
+        if (uniform_texture_babylon >= 0)
+        {
+            glUniform1i(uniform_texture_babylon, 1);
+            glActiveTexture(GL_TEXTURE1);
+            auto texId = (GLuint) (size_t) Views[0].ColorTexturePointer;
+            GLint old_texture1Binding;
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture1Binding);
+            glBindTexture(GL_TEXTURE_2D, texId);
+        }
+
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
         eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
 
         glUseProgram(0);
-        glDepthMask(GL_TRUE);
+        //glDepthMask(GL_TRUE);
+        glClearColor(old_clearColor[0], old_clearColor[1], old_clearColor[2], old_clearColor[3]);
+        old_glCullFace ?
+            glEnable(GL_CULL_FACE) :
+            glDisable(GL_CULL_FACE);
+        old_glDepthTest ?
+            glEnable(GL_DEPTH_TEST) :
+            glDisable(GL_DEPTH_TEST);
+        old_glBlend ?
+            glEnable(GL_BLEND) :
+            glDisable(GL_BLEND);
+        old_glDepthMask ?
+            glDepthMask(GL_TRUE) :
+            glDepthMask(GL_FALSE);
+        glBlendFunc(GL_SRC_ALPHA, old_glBlendFunc);
         glBindFramebuffer(GL_FRAMEBUFFER, drawFboId);
+
 
         /* TODO CG: set back original gl context with eglMakeCurrent*/
     }

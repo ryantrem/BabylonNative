@@ -22,7 +22,7 @@ public class BabylonView extends SurfaceView implements SurfaceHolder.Callback2,
         SurfaceHolder xrHolder = xrView.getHolder();
         xrHolder.addCallback(this);
 
-        BabylonNative.Wrapper.initEngine(context.getResources().getAssets());
+        BabylonNative.Wrapper.initEngine(context.getResources().getAssets(), context);
     }
 
     private void init(ViewDelegate viewDelegate) {
