@@ -53,6 +53,7 @@ namespace
         std::array<float, 16> bxResult{};
         bx::mtxProj(bxResult.data(), t, b, l, r, n, f, false, bx::Handness::Right);
 
+        bx::mtxProj(bxResult.data(), 60.f, 1.f, 0.01f, 1000.f, false, bx::Handness::Right);
         return bxResult;
     }
 
@@ -100,12 +101,25 @@ namespace
             // Invert to get the view space transform.
             std::array<float, 16> viewSpaceTransform{};
             bx::mtxInverse(viewSpaceTransform.data(), worldSpaceTransform.data());
-
+            viewSpaceTransform = {
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    0, 0, 0, 1
+            };
             return viewSpaceTransform;
         }
         else
         {
-            return worldSpaceTransform;
+            std::array<float, 16> world
+            = {
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    0, 0, 0, 1
+            };
+
+            return world;
         }
     }
 

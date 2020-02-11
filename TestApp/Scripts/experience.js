@@ -133,12 +133,21 @@ CreateBoxAsync().then(function () {
         setTimeout(function () {
             scene.createDefaultXRExperienceAsync({ disableDefaultUI: true }).then((xr) => {
                 setTimeout(function () {
-                    scene.meshes[0].position = scene.activeCamera.getFrontPosition(2);
-                    scene.meshes[0].rotate(BABYLON.Vector3.Up(), 3.14159);
+                    scene.meshes[0].position = new BABYLON.Vector3(0, 0, 2.5); //scene.activeCamera.getFrontPosition(2);
+                    //scene.meshes[0].rotate(BABYLON.Vector3.Up(), 3.14159);
                 }, 5000);
+
+                var rotateCube = function () {
+                    scene.meshes[0].rotate(BABYLON.Vector3.Up(), 0.02);
+                    scene.meshes[0].rotate(BABYLON.Vector3.Right(), 0.015);
+                    window.setTimeout(rotateCube, 20);
+                };
+        
+                window.setTimeout(rotateCube, 20);
+
                 return xr.baseExperience.enterXRAsync("immersive-vr", "unbounded", xr.renderTarget);
             });
-        }, 10000);
+        }, 2000);
     }
     
 }, function (ex) {
