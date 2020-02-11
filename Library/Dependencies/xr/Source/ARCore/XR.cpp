@@ -241,7 +241,7 @@ namespace xr
             GLuint colorTextureId;
             glGenTextures(1, &colorTextureId);
             glBindTexture(GL_TEXTURE_2D, colorTextureId);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glBindTexture(GL_TEXTURE_2D, 0);
@@ -395,6 +395,16 @@ namespace xr
 */
         GLint drawFboId;
         glGetIntegerv(GL_FRAMEBUFFER_BINDING, &drawFboId);
+        GLfloat old_clearColor[4];
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, old_clearColor);
+        GLboolean old_glCullFace = glIsEnabled(GL_CULL_FACE);
+        GLboolean old_glDepthTest = glIsEnabled(GL_DEPTH_TEST);
+        GLboolean old_glBlend = glIsEnabled(GL_BLEND);
+        GLboolean old_glDepthMask;
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &old_glDepthMask);
+        GLint old_glBlendFunc;
+        glGetIntegerv(GL_BLEND_SRC_ALPHA, &old_glBlendFunc);
+
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, Views[0].ColorTextureSize.Width, Views[0].ColorTextureSize.Height);
 
@@ -412,6 +422,8 @@ namespace xr
         auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_camera");
         glUniform1i(uniform_texture_, 0);
         glActiveTexture(GL_TEXTURE0);
+        GLint old_texture0Binding;
+        glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &old_texture0Binding);
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
 
         auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_, "cameraTexCoord");
@@ -423,6 +435,8 @@ namespace xr
             glUniform1i(uniform_texture_babylon, 1);
             glActiveTexture(GL_TEXTURE1);
             auto texId = (GLuint) (size_t) Views[0].ColorTexturePointer;
+            GLint old_texture1Binding;
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture1Binding);
             glBindTexture(GL_TEXTURE_2D, texId);
         }
 
@@ -431,8 +445,23 @@ namespace xr
         eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
 
         glUseProgram(0);
-        glDepthMask(GL_TRUE);
+        //glDepthMask(GL_TRUE);
+        glClearColor(old_clearColor[0], old_clearColor[1], old_clearColor[2], old_clearColor[3]);
+        old_glCullFace ?
+            glEnable(GL_CULL_FACE) :
+            glDisable(GL_CULL_FACE);
+        old_glDepthTest ?
+            glEnable(GL_DEPTH_TEST) :
+            glDisable(GL_DEPTH_TEST);
+        old_glBlend ?
+            glEnable(GL_BLEND) :
+            glDisable(GL_BLEND);
+        old_glDepthMask ?
+            glDepthMask(GL_TRUE) :
+            glDepthMask(GL_FALSE);
+        glBlendFunc(GL_SRC_ALPHA, old_glBlendFunc);
         glBindFramebuffer(GL_FRAMEBUFFER, drawFboId);
+
 
         /* TODO CG: set back original gl context with eglMakeCurrent*/
     }
