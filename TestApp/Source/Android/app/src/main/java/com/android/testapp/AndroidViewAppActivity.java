@@ -67,7 +67,7 @@ public class AndroidViewAppActivity extends Activity implements BabylonView.View
         mView.loadScript("Scripts/experience.js");
         mView.eval("setTimeout(function(){" +
                 "var red = new BABYLON.StandardMaterial(\"red\", scene);" +
-                "red.diffuseColor = new BABYLON.Color3 (128,0,0);" +
+                "red.diffuseColor = new BABYLON.Color3 (1,0.4,0.1);" +
                 "cube.material = red;" +
                 "}, 2000);" , "testEval");
     }
