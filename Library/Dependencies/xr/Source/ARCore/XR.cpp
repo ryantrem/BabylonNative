@@ -192,7 +192,6 @@ namespace xr
         GLint uniform_texture_;
         GLuint vertexArray;
         GLuint vertexBuffer;
-
         GLuint cameraTextureId{};
 
         ArSession* session{};
@@ -237,6 +236,7 @@ namespace xr
             success = eglMakeCurrent(Display, Surface, Surface, RenderContext);
             success = eglMakeCurrent(Display, Surface, Surface, OriginalContext);
 */
+
             // Allocate and store the render texture and camera texture
             GLuint colorTextureId;
             glGenTextures(1, &colorTextureId);
@@ -427,6 +427,7 @@ namespace xr
         GLint old_texture0Binding;
         glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &old_texture0Binding);
         glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
+        glBindSampler(0, 0);
 
         auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_, "cameraTexCoord");
         glUniform2fv(uniform_uvs, 4, m_sessionImpl.transformed_uvs);
@@ -440,6 +441,8 @@ namespace xr
             GLint old_texture1Binding;
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture1Binding);
             glBindTexture(GL_TEXTURE_2D, texId);
+
+            glBindSampler(1, 0);
         }
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
