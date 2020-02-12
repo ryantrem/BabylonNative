@@ -359,8 +359,10 @@ namespace xr
             //float fov = RAD2DEG * (2.0f * std::atan(1.0f / b));
             float fov = std::atan(1.0f / b);
 
-            Views[0].FieldOfView.AngleUp = Views[0].FieldOfView.AngleDown = fov;
-            Views[0].FieldOfView.AngleLeft = Views[0].FieldOfView.AngleRight = fov * aspect_ratio;
+            Views[0].FieldOfView.AngleUp = fov;
+            Views[0].FieldOfView.AngleDown = -fov;
+            Views[0].FieldOfView.AngleLeft = -fov * aspect_ratio;
+            Views[0].FieldOfView.AngleRight = fov * aspect_ratio;
 
             // TODO: Seems like projection matrix is not being reconstructed correctly from this in NativeXR.cpp#56
         }
