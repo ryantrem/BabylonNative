@@ -266,6 +266,7 @@ namespace xr
             glBindTexture(GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
             glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
 
             shader_program_ = CreateShaderProgram();
 
@@ -442,7 +443,7 @@ namespace xr
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
-        eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
+        //eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
 
         glUseProgram(0);
         //glDepthMask(GL_TRUE);
