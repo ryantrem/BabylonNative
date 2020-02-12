@@ -143,11 +143,11 @@ CreateBoxAsync().then(function () {
                     window.setTimeout(rotateCube, 20);
                 };
         
-                window.setTimeout(rotateCube, 20);
+                //window.setTimeout(rotateCube, 20);
 
                 return xr.baseExperience.enterXRAsync("immersive-vr", "unbounded", xr.renderTarget);
             });
-        }, 2000);
+        }, 5000);
     }
     
 }, function (ex) {
