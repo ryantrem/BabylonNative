@@ -94,6 +94,11 @@ task copyFiles {
         include "*.js"
         into 'src/main/assets/Scripts'
     }
+    copy {
+        from '../../../Scripts/textures'
+        include "*"
+        into 'src/main/assets/textures'
+    }
 }
 
 preBuild.dependsOn(copyFiles)
