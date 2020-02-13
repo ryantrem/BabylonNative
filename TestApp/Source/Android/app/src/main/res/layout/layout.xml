@@ -3,19 +3,24 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
+
     <FrameLayout
         android:id="@+id/layout1"
         android:layout_width="match_parent"
-        android:layout_height="400dp">
+        android:layout_height="match_parent">
+
         <Button
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:text="test1" />
     </FrameLayout>
+
     <FrameLayout
         android:id="@+id/layout2"
         android:layout_width="match_parent"
-        android:layout_height="400dp">
+        android:layout_height="400dp"
+        android:visibility="invisible">
+
         <Button
             android:layout_width="match_parent"
             android:layout_height="match_parent"
