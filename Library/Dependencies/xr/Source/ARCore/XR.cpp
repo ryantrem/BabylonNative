@@ -427,21 +427,19 @@ namespace xr
             glUseProgram(m_sessionImpl.shader_program_);
             glDepthMask(GL_FALSE);
 
-            auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_,
-                                                         "texture_camera");
+            auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_camera");
             glUniform1i(uniform_texture_, 0);
             glActiveTexture(GL_TEXTURE0);
             GLint old_texture0Binding;
             glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &old_texture0Binding);
             glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
 
-            auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_,
-                                                    "cameraTexCoord");
+            auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_, "cameraTexCoord");
             glUniform2fv(uniform_uvs, 4, m_sessionImpl.transformed_uvs);
 
-            auto uniform_texture_babylon = glGetUniformLocation(m_sessionImpl.shader_program_,
-                                                                "texture_babylon");
-            if (uniform_texture_babylon >= 0) {
+            auto uniform_texture_babylon = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_babylon");
+            if (uniform_texture_babylon >= 0)
+            {
                 glUniform1i(uniform_texture_babylon, 1);
                 glActiveTexture(GL_TEXTURE1);
                 auto texId = (GLuint) (size_t) Views[0].ColorTexturePointer;
@@ -456,8 +454,7 @@ namespace xr
 
             glUseProgram(0);
             //glDepthMask(GL_TRUE);
-            glClearColor(old_clearColor[0], old_clearColor[1], old_clearColor[2],
-                         old_clearColor[3]);
+            glClearColor(old_clearColor[0], old_clearColor[1], old_clearColor[2], old_clearColor[3]);
             old_glCullFace ?
             glEnable(GL_CULL_FACE) :
             glDisable(GL_CULL_FACE);
