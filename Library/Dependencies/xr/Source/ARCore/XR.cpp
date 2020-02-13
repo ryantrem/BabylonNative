@@ -266,6 +266,7 @@ namespace xr
             glBindTexture(GL_TEXTURE_EXTERNAL_OES, cameraTextureId);
             glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
 
             shader_program_ = CreateShaderProgram();
 
@@ -389,81 +390,92 @@ namespace xr
 
     System::Session::Frame::~Frame()
     {
-/*
-        TODO cg: bind gl context used for rendering
-        auto success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.RenderContext);
-*/
-        GLint drawFboId;
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &drawFboId);
-        GLfloat old_clearColor[4];
-        glGetFloatv(GL_COLOR_CLEAR_VALUE, old_clearColor);
-        GLboolean old_glCullFace = glIsEnabled(GL_CULL_FACE);
-        GLboolean old_glDepthTest = glIsEnabled(GL_DEPTH_TEST);
-        GLboolean old_glBlend = glIsEnabled(GL_BLEND);
-        GLboolean old_glDepthMask;
-        glGetBooleanv(GL_DEPTH_WRITEMASK, &old_glDepthMask);
-        GLint old_glBlendFunc;
-        glGetIntegerv(GL_BLEND_SRC_ALPHA, &old_glBlendFunc);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, Views[0].ColorTextureSize.Width, Views[0].ColorTextureSize.Height);
-
-        glClearColor(0, 1, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        glDisable(GL_CULL_FACE);
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glUseProgram(m_sessionImpl.shader_program_);
-        glDepthMask(GL_FALSE);
-
-        auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_camera");
-        glUniform1i(uniform_texture_, 0);
-        glActiveTexture(GL_TEXTURE0);
-        GLint old_texture0Binding;
-        glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &old_texture0Binding);
-        glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
-
-        auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_, "cameraTexCoord");
-        glUniform2fv(uniform_uvs, 4, m_sessionImpl.transformed_uvs);
-
-        auto uniform_texture_babylon = glGetUniformLocation(m_sessionImpl.shader_program_, "texture_babylon");
-        if (uniform_texture_babylon >= 0)
+        // Suppress rendering if the camera did not produce the first frame yet.
+        // This is to avoid drawing possible leftover data from previous sessions if
+        // the texture is reused.
+        int64_t frame_timestamp;
+        ArFrame_getTimestamp(m_sessionImpl.session, m_sessionImpl.frame, &frame_timestamp);
+        if (frame_timestamp != 0)
         {
-            glUniform1i(uniform_texture_babylon, 1);
-            glActiveTexture(GL_TEXTURE1);
-            auto texId = (GLuint) (size_t) Views[0].ColorTexturePointer;
-            GLint old_texture1Binding;
-            glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture1Binding);
-            glBindTexture(GL_TEXTURE_2D, texId);
-        }
+/*
+            TODO cg: bind gl context used for rendering
+            auto success = eglMakeCurrent(m_sessionImpl.Display, m_sessionImpl.Surface, m_sessionImpl.Surface, m_sessionImpl.RenderContext);
+*/
+            GLint drawFboId;
+            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &drawFboId);
+            GLfloat old_clearColor[4];
+            glGetFloatv(GL_COLOR_CLEAR_VALUE, old_clearColor);
+            GLboolean old_glCullFace = glIsEnabled(GL_CULL_FACE);
+            GLboolean old_glDepthTest = glIsEnabled(GL_DEPTH_TEST);
+            GLboolean old_glBlend = glIsEnabled(GL_BLEND);
+            GLboolean old_glDepthMask;
+            glGetBooleanv(GL_DEPTH_WRITEMASK, &old_glDepthMask);
+            GLint old_glBlendFunc;
+            glGetIntegerv(GL_BLEND_SRC_ALPHA, &old_glBlendFunc);
 
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, Views[0].ColorTextureSize.Width, Views[0].ColorTextureSize.Height);
 
-        eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
+            glClearColor(0, 1, 0, 1);
+            glClear(GL_COLOR_BUFFER_BIT);
 
-        glUseProgram(0);
-        //glDepthMask(GL_TRUE);
-        glClearColor(old_clearColor[0], old_clearColor[1], old_clearColor[2], old_clearColor[3]);
-        old_glCullFace ?
+            glDisable(GL_CULL_FACE);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            glUseProgram(m_sessionImpl.shader_program_);
+            glDepthMask(GL_FALSE);
+
+            auto uniform_texture_ = glGetUniformLocation(m_sessionImpl.shader_program_,
+                                                         "texture_camera");
+            glUniform1i(uniform_texture_, 0);
+            glActiveTexture(GL_TEXTURE0);
+            GLint old_texture0Binding;
+            glGetIntegerv(GL_TEXTURE_BINDING_EXTERNAL_OES, &old_texture0Binding);
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES, m_sessionImpl.cameraTextureId);
+
+            auto uniform_uvs = glGetUniformLocation(m_sessionImpl.shader_program_,
+                                                    "cameraTexCoord");
+            glUniform2fv(uniform_uvs, 4, m_sessionImpl.transformed_uvs);
+
+            auto uniform_texture_babylon = glGetUniformLocation(m_sessionImpl.shader_program_,
+                                                                "texture_babylon");
+            if (uniform_texture_babylon >= 0) {
+                glUniform1i(uniform_texture_babylon, 1);
+                glActiveTexture(GL_TEXTURE1);
+                auto texId = (GLuint) (size_t) Views[0].ColorTexturePointer;
+                GLint old_texture1Binding;
+                glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture1Binding);
+                glBindTexture(GL_TEXTURE_2D, texId);
+            }
+
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+            eglSwapBuffers(m_sessionImpl.Display, m_sessionImpl.Surface);
+
+            glUseProgram(0);
+            //glDepthMask(GL_TRUE);
+            glClearColor(old_clearColor[0], old_clearColor[1], old_clearColor[2],
+                         old_clearColor[3]);
+            old_glCullFace ?
             glEnable(GL_CULL_FACE) :
             glDisable(GL_CULL_FACE);
-        old_glDepthTest ?
+            old_glDepthTest ?
             glEnable(GL_DEPTH_TEST) :
             glDisable(GL_DEPTH_TEST);
-        old_glBlend ?
+            old_glBlend ?
             glEnable(GL_BLEND) :
             glDisable(GL_BLEND);
-        old_glDepthMask ?
+            old_glDepthMask ?
             glDepthMask(GL_TRUE) :
             glDepthMask(GL_FALSE);
-        glBlendFunc(GL_SRC_ALPHA, old_glBlendFunc);
-        glBindFramebuffer(GL_FRAMEBUFFER, drawFboId);
+            glBlendFunc(GL_SRC_ALPHA, old_glBlendFunc);
+            glBindFramebuffer(GL_FRAMEBUFFER, drawFboId);
 
 
-        /* TODO CG: set back original gl context with eglMakeCurrent*/
+            /* TODO CG: set back original gl context with eglMakeCurrent*/
+        }
     }
 
     System::System(const char* appName)
