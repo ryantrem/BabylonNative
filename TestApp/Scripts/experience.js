@@ -7,7 +7,7 @@ var xr = true;
 var cube;
 
 function CreateBoxAsync() {
-    cube = BABYLON.Mesh.CreateBox("box1", 0.7);
+    cube = BABYLON.Mesh.CreateBox("box1", 0.2);
     return Promise.resolve();
 }
 
@@ -133,7 +133,7 @@ CreateBoxAsync().then(function () {
         setTimeout(function () {
             scene.createDefaultXRExperienceAsync({ disableDefaultUI: true }).then((xr) => {
                 setTimeout(function () {
-                    scene.meshes[0].position = new BABYLON.Vector3(0, 0, 2.5); //scene.activeCamera.getFrontPosition(2);
+                    scene.meshes[0].position = new BABYLON.Vector3(0, 0, 1); //scene.activeCamera.getFrontPosition(2);
                     //scene.meshes[0].rotate(BABYLON.Vector3.Up(), 3.14159);
                 }, 5000);
 
