@@ -8,7 +8,7 @@ if (NOT DEFINED NAPI_JAVASCRIPT_ENGINE)
         set(NAPI_JAVASCRIPT_ENGINE "Chakra" CACHE STRING "JavaScript engine for N-API.")
     elseif (ANDROID)
         # engine is selected in native build cmakelists.txt
-    elseif (APPLE)
+    elseif (APPLE OR UNIX)
         set(NAPI_JAVASCRIPT_ENGINE "JavaScriptCore" CACHE STRING "JavaScript engine for N-API.")
     else()
         message(FATAL_ERROR "Unable to select N-API JavaScript engine for platform.")
@@ -27,7 +27,6 @@ set(SOURCES
     "include/napi/js_native_api_types.h"
     "include/napi/napi.h"
     "include/napi/napi-inl.h"
-    "include/napi/napi-shared-reference.h"
     "source/env.cc"
     "source/env_${NAPI_JAVASCRIPT_ENGINE}.cc"
     "source/js_native_api_${NAPI_JAVASCRIPT_ENGINE}.cc"
@@ -92,6 +91,10 @@ if(NOT TARGET javascript_engine)
         target_link_to_dependencies(javascript_engine INTERFACE v8)
     elseif(NAPI_JAVASCRIPT_ENGINE STREQUAL "Chakra")
         target_link_to_dependencies(javascript_engine INTERFACE "chakrart.lib")
+    elseif(NAPI_JAVASCRIPT_ENGINE STREQUAL "JavaScriptCore" AND UNIX AND NOT ANDROID AND NOT APPLE)
+        target_include_directories(napi PUBLIC "/usr/include/webkitgtk-4.0")
+        find_library(JSCORE_LIBRARY JavaScriptCore)
+        target_link_to_dependencies(javascript_engine INTERFACE ${JSCORE_LIBRARY})
     endif()
 endif()
 target_link_to_dependencies(napi PUBLIC javascript_engine)

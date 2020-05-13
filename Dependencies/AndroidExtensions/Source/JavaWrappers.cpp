@@ -171,9 +171,19 @@ namespace android::content
     {
     }
 
+    Context Context::getApplicationContext()
+    {
+        return {m_env->CallObjectMethod(m_object, m_env->GetMethodID(m_class, "getApplicationContext", "()Landroid/content/Context;"))};
+    }
+
     res::AssetManager Context::getAssets() const
     {
         return {m_env->CallObjectMethod(m_object, m_env->GetMethodID(m_class, "getAssets", "()Landroid/content/res/AssetManager;"))};
+    }
+
+    jobject Context::getSystemService(const char* serviceName)
+    {
+        return m_env->CallObjectMethod(m_object, m_env->GetMethodID(m_class, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;"), m_env->NewStringUTF(serviceName));
     }
 }
 
@@ -187,6 +197,29 @@ namespace android::content::res
     AssetManager::operator AAssetManager*() const
     {
         return AAssetManager_fromJava(m_env, m_object);
+    }
+}
+
+namespace android::view
+{
+    Display::Display(jobject object)
+            : Object("android/view/Display", object)
+    {
+    }
+
+    int Display::getRotation()
+    {
+        return m_env->CallIntMethod(m_object, m_env->GetMethodID(m_class, "getRotation", "()I"));
+    }
+
+    WindowManager::WindowManager(jobject object)
+        : Object("android/view/WindowManager", object)
+    {
+    }
+
+    Display WindowManager::getDefaultDisplay()
+    {
+        return {m_env->CallObjectMethod(m_object, m_env->GetMethodID(m_class, "getDefaultDisplay", "()Landroid/view/Display;"))};
     }
 }
 

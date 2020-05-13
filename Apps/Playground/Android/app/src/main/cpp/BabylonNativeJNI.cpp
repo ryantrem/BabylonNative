@@ -13,6 +13,7 @@
 #include <Babylon/ScriptLoader.h>
 #include <Babylon/Plugins/NativeEngine.h>
 #include <Babylon/Plugins/NativeWindow.h>
+#include <Babylon/Plugins/NativeXr.h>
 #include <Babylon/Polyfills/Console.h>
 #include <Babylon/Polyfills/Window.h>
 #include <Babylon/Polyfills/XMLHttpRequest.h>
@@ -42,7 +43,7 @@ extern "C"
     }
 
     JNIEXPORT void JNICALL
-    Java_BabylonNative_Wrapper_surfaceCreated(JNIEnv* env, jclass clazz, jobject surface, jobject appContext)
+    Java_BabylonNative_Wrapper_surfaceCreated(JNIEnv* env, jclass clazz, jobject surface, jobject context)
     {
         if (!g_runtime)
         {
@@ -54,16 +55,13 @@ extern "C"
                 throw std::runtime_error("Failed to get Java VM");
             }
 
-            // TODO: This should be cleaned up via env->DeleteGlobalRef
-            auto globalAppContext = env->NewGlobalRef(appContext);
-
-            android::global::Initialize(javaVM, globalAppContext);
+            android::global::Initialize(javaVM, context);
 
             ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
             int32_t width  = ANativeWindow_getWidth(window);
             int32_t height = ANativeWindow_getHeight(window);
 
-            g_runtime->Dispatch([javaVM, globalAppContext, window, width, height](Napi::Env env)
+            g_runtime->Dispatch([javaVM, window, width, height](Napi::Env env)
             {
                 Babylon::Polyfills::Console::Initialize(env, [](const char* message, Babylon::Polyfills::Console::LogLevel level)
                 {
@@ -85,6 +83,8 @@ extern "C"
 
                 Babylon::Plugins::NativeEngine::InitializeGraphics(window, width, height);
                 Babylon::Plugins::NativeEngine::Initialize(env);
+
+                Babylon::Plugins::NativeXr::Initialize(env);
 
                 Babylon::Polyfills::Window::Initialize(env);
                 Babylon::Polyfills::XMLHttpRequest::Initialize(env);
@@ -121,6 +121,7 @@ extern "C"
     JNIEXPORT void JNICALL
     Java_BabylonNative_Wrapper_activityOnPause(JNIEnv* env, jclass clazz)
     {
+        android::global::Pause();
         if (g_runtime)
         {
             g_runtime->Suspend();
@@ -134,6 +135,26 @@ extern "C"
         {
             g_runtime->Resume();
         }
+        android::global::Resume();
+    }
+
+    JNIEXPORT void JNICALL
+    Java_BabylonNative_Wrapper_activityOnRequestPermissionsResult(JNIEnv* env, jclass clazz, jint requestCode, jobjectArray permissions, jintArray grantResults)
+    {
+        std::vector<std::string> nativePermissions{};
+        for (int i = 0; i < env->GetArrayLength(permissions); i++)
+        {
+            jstring permission = (jstring)env->GetObjectArrayElement(permissions, i);
+            nativePermissions.push_back({env->GetStringUTFChars(permission, nullptr)});
+            env->ReleaseStringUTFChars(permission, nullptr);
+        }
+
+        auto grantResultElements{env->GetIntArrayElements(grantResults, nullptr)};
+        auto grantResultElementCount = env->GetArrayLength(grantResults);
+        std::vector<int32_t> nativeGrantResults{grantResultElements, grantResultElements + grantResultElementCount};
+        env->ReleaseIntArrayElements(grantResults, grantResultElements, 0);
+
+        android::global::RequestPermissionsResult(requestCode, nativePermissions, nativeGrantResults);
     }
 
     JNIEXPORT void JNICALL
