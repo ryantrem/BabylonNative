@@ -66,6 +66,7 @@ namespace {
  */
 @implementation SessionDelegate {
     std::vector<xr::System::Session::Frame::View>* activeFrameViews;
+    UIView* xrView;
     CVMetalTextureCacheRef textureCache;
     CVMetalTextureRef _cameraTextureY;
     CVMetalTextureRef _cameraTextureCbCr;
@@ -101,9 +102,10 @@ namespace {
 /**
  Initializes this session delgate with the given frame views and metal graphics context.
  */
-- (id)init:(std::vector<xr::System::Session::Frame::View>*)activeFrameViews metalContext:(id<MTLDevice>)graphicsContext {
+- (id)init:(std::vector<xr::System::Session::Frame::View>*)activeFrameViews metalContext:(id<MTLDevice>)graphicsContext xrView:(UIView*)xrView {
     self = [super init];
     self->activeFrameViews = activeFrameViews;
+    self->xrView = xrView;
     
     CVReturn err = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, graphicsContext, nil, &textureCache);
     if (err) {
@@ -140,6 +142,12 @@ namespace {
  If a size change is detected also sets the UVs, and FoV values.
 */
 - (void)session:(ARSession *)__unused session didUpdateFrame:(ARFrame *)frame {
+    auto scale = UIScreen.mainScreen.scale;
+    auto x = xrView.bounds.size.width * scale;
+    auto y = xrView.bounds.size.height * scale;
+    NSLog(@"x: %@", [NSNumber numberWithDouble:x]);
+    NSLog(@"y: %@", [NSNumber numberWithDouble:y]);
+    
     @autoreleasepool{
         // Update both metal textures used by the renderer to display the camera image.
         CVMetalTextureRef newCameraTextureY = [self getCameraTexture:frame.capturedImage plane:0];
@@ -204,7 +212,7 @@ namespace {
     if (cameraUVReferenceOrientation != orientation || cameraUVReferenceSize.height != viewportSize.height || cameraUVReferenceSize.width != viewportSize.width) {
         // The default transform is for converting normalized image coordinates to UVs, we want the inverse as we are converting
         // UVs to normalized image coordinates.
-        auto transform = CGAffineTransformInvert([frame displayTransformForOrientation:orientation viewportSize:[self viewportSize]]);
+        auto transform = CGAffineTransformInvert([frame displayTransformForOrientation:orientation viewportSize:viewportSize]);
         for(size_t i = 0; i < sizeof(vertices) / sizeof(*vertices); i++) {
             CGPoint transformedPoint = CGPointApplyAffineTransform({vertices[i].uv[0], vertices[i].uv[1]}, transform);
             
@@ -430,10 +438,11 @@ namespace xr {
             metalDevice = id<MTLDevice>(graphicsContext);
             UIView* MainView = (UIView*)window;
             
-            // Create the XR View to stay within the safe area of the main view.
+            // Create the XR View as a subview of the main view
             dispatch_sync(dispatch_get_main_queue(), ^{
                 xrView = [[MTKView alloc] initWithFrame:MainView.bounds device:metalDevice];
                 [MainView addSubview:xrView];
+                xrView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
                 xrView.userInteractionEnabled = false;
                 xrView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
                 xrView.depthStencilPixelFormat = MTLPixelFormatDepth32Float_Stencil8;
@@ -458,7 +467,7 @@ namespace xr {
             }
             
             metalDevice = id<MTLDevice>(graphicsContext);
-            sessionDelegate = [[SessionDelegate new]init:&ActiveFrameViews metalContext:metalDevice];
+            sessionDelegate = [[SessionDelegate new]init:&ActiveFrameViews metalContext:metalDevice xrView:xrView];
             session.delegate = sessionDelegate;
             [session runWithConfiguration:configuration];
 
@@ -517,6 +526,12 @@ namespace xr {
         }
 
         std::unique_ptr<System::Session::Frame> GetNextFrame(bool& shouldEndSession, bool& shouldRestartSession) {
+            auto scale = UIScreen.mainScreen.scale;
+            viewportSize.x = xrView.bounds.size.width * scale;
+            viewportSize.y = xrView.bounds.size.height * scale;
+//            NSLog(@"x: %@", [NSNumber numberWithDouble:x]);
+//            NSLog(@"y: %@", [NSNumber numberWithDouble:y]);
+            
             uint32_t width = viewportSize.x;
             uint32_t height = viewportSize.y;
             shouldEndSession = sessionEnded;
@@ -647,7 +662,7 @@ namespace xr {
                         renderEncoder.label = @"XRDisplayEncoder";
 
                         // Set the region of the drawable to draw into.
-                        [renderEncoder setViewport:(MTLViewport){0.0, 0.0, static_cast<double>(viewportSize.x), static_cast<double>(viewportSize.y), 0.0, 1.0 }];
+                        [renderEncoder setViewport:(MTLViewport){0.0, 0.0, static_cast<double>(ActiveFrameViews[0].ColorTextureSize.Width), static_cast<double>(ActiveFrameViews[0].ColorTextureSize.Height), 0.0, 1.0 }];
                         
                         [renderEncoder setRenderPipelineState:pipelineState];
 
