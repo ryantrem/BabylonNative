@@ -534,7 +534,6 @@ namespace xr {
             , getMainView{ [windowProvider{ std::move(windowProvider) }] { return reinterpret_cast<UIView*>(windowProvider()); } }
             , metalDevice{ id<MTLDevice>(graphicsContext) } {
             UIView* mainView = getMainView();
-            [mainView retain];
 
             // Create the XR View to stay within the safe area of the main view.
             dispatch_sync(dispatch_get_main_queue(), ^{
@@ -614,7 +613,6 @@ namespace xr {
             [session release];
             [pipelineState release];
             [xrView releaseDrawables];
-            [[xrView superview] release];
             dispatch_sync(dispatch_get_main_queue(), ^{
                 [xrView removeFromSuperview]; });
             [xrView release];
@@ -643,6 +641,10 @@ namespace xr {
             shouldEndSession = sessionEnded;
             shouldRestartSession = false;
 
+            if (shouldEndSession) {
+                return {};
+            }
+
             // We may or may not be under the scope of an autoreleasepool already, so to guard against both cases grab the
             // current frame inside a locally scoped autoreleasepool and manually retain the frame without marking for autorelease.
             // DEVNOTE: We should change the contract to always run the work queue tick as part of an autoreleasepool so that it is the same for all environments see:
@@ -657,12 +659,8 @@ namespace xr {
                 UIView* currentSuperview = [xrView superview];
                 UIView* desiredSuperview = getMainView();
                 if (currentSuperview != desiredSuperview) {
-                    [currentSuperview release];
                     [xrView removeFromSuperview];
-
                     [xrView setFrame:desiredSuperview.bounds];
-
-                    [desiredSuperview retain];
                     [desiredSuperview addSubview:xrView];
                 }
                 
