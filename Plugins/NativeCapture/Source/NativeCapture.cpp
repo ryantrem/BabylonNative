@@ -94,6 +94,8 @@ namespace Babylon::Plugins::Internal
 
     class NativeCapture : public Napi::ObjectWrap<NativeCapture>
     {
+        using TicketT = arcana::ticketed_collection<std::function<void(const BgfxCallback::CaptureData&)>>::ticket;
+
     public:
         static constexpr auto JS_CLASS_NAME = "NativeCapture";
 
@@ -105,7 +107,7 @@ namespace Babylon::Plugins::Internal
                 env,
                 JS_CLASS_NAME,
                 {
-                    NativeCapture::InstanceMethod("addOnCaptureCallback", &NativeCapture::AddOnCaptureCallback),
+                    NativeCapture::InstanceMethod("addCallback", &NativeCapture::AddCallback),
                     NativeCapture::InstanceMethod("dispose", &NativeCapture::Dispose),
                 });
 
@@ -116,13 +118,22 @@ namespace Babylon::Plugins::Internal
             : Napi::ObjectWrap<NativeCapture>{info}
             , m_runtime{JsRuntime::GetFromJavaScript(info.Env())}
             , m_graphicsImpl(Graphics::Impl::GetFromJavaScript(info.Env()))
-            , m_ticket{m_graphicsImpl.AddCaptureCallback([this](auto& data) { CaptureDataReceived(data); })}
+            , m_ticket{std::make_unique<TicketT>(m_graphicsImpl.AddCaptureCallback([this](auto& data) { CaptureDataReceived(data); }))}
         {
-            m_graphicsImpl.StartCapture();
+        }
+
+        ~NativeCapture()
+        {
+            if (m_ticket != nullptr)
+            {
+                // If m_ticket is still active, this object is being garbage collected without
+                // having been disposed, so it must dispose itself.
+                Dispose();
+            }
         }
 
     private:
-        void AddOnCaptureCallback(const Napi::CallbackInfo& info)
+        void AddCallback(const Napi::CallbackInfo& info)
         {
             auto listener = info[0].As<Napi::Function>();
             m_callbacks.push_back(Napi::Persistent(listener));
@@ -164,16 +175,21 @@ namespace Babylon::Plugins::Internal
             });
         }
 
+        void Dispose()
+        {
+            m_callbacks.clear();
+            m_ticket.reset();
+        }
+
         void Dispose(const Napi::CallbackInfo&)
         {
-            m_graphicsImpl.StopCapture();
-            m_callbacks.clear();
+            Dispose();
         }
 
         JsRuntime& m_runtime;
         Graphics::Impl& m_graphicsImpl;
         std::vector<Napi::FunctionReference> m_callbacks{};
-        arcana::ticketed_collection<std::function<void(const BgfxCallback::CaptureData&)>>::ticket m_ticket;
+        std::unique_ptr<TicketT> m_ticket{};
     };
 }
 

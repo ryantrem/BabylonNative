@@ -6,12 +6,15 @@
 #include <stdarg.h>
 #include <bgfx/bgfx.h>
 #include <Babylon/JsRuntime.h>
-
 #include <assert.h>
-#include <sstream>
 
 namespace Babylon
 {
+    BgfxCallback::BgfxCallback(std::function<void(const CaptureData&)> captureCallback)
+        : m_captureCallback{std::move(captureCallback)}
+    {
+    }
+
     void BgfxCallback::addScreenShotCallback(Napi::Function callback)
     {
         std::scoped_lock lock{ m_ssCallbackAccess };
@@ -143,10 +146,6 @@ namespace Babylon
         m_captureData.Data = data;
         m_captureData.DataSize = size;
 
-        std::scoped_lock lock{m_captureCallbacksMutex};
-        for (const auto& callback : m_captureCallbacks)
-        {
-            callback(m_captureData);
-        }
+        m_captureCallback(m_captureData);
     }
 }
