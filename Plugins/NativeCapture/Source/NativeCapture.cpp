@@ -1,5 +1,4 @@
 #include "NativeCapture.h"
-#include "AviWriter.h"
 #include "Bitmap.hpp"
 
 #include <Babylon/JsRuntime.h>
@@ -11,86 +10,6 @@ namespace Babylon::Plugins::Internal
 {
     namespace
     {
-//        void write_bitmap(uint32_t width, uint32_t height, const std::vector<uint8_t>&)
-//        {
-//            typedef struct                       /**** BMP file header structure ****/
-//            {
-//                unsigned int   bfSize;           /* Size of file */
-//                unsigned short bfReserved1;      /* Reserved */
-//                unsigned short bfReserved2;      /* ... */
-//                unsigned int   bfOffBits;        /* Offset to bitmap data */
-//            } BITMAPFILEHEADER;
-//
-//            typedef struct                       /**** BMP file info structure ****/
-//            {
-//                unsigned int   biSize;           /* Size of info header */
-//                int            biWidth;          /* Width of image */
-//                int            biHeight;         /* Height of image */
-//                unsigned short biPlanes;         /* Number of color planes */
-//                unsigned short biBitCount;       /* Number of bits per pixel */
-//                unsigned int   biCompression;    /* Type of compression to use */
-//                unsigned int   biSizeImage;      /* Size of image data */
-//                int            biXPelsPerMeter;  /* X pixels per meter */
-//                int            biYPelsPerMeter;  /* Y pixels per meter */
-//                unsigned int   biClrUsed;        /* Number of colors used */
-//                unsigned int   biClrImportant;   /* Number of important colors */
-//            } BITMAPINFOHEADER;
-//
-//            BITMAPFILEHEADER bfh;
-//            BITMAPINFOHEADER bih;
-//
-///* Magic number for file. It does not fit in the header structure due to alignment requirements, so put it outside */
-//            unsigned short bfType=0x4d42;
-//            bfh.bfReserved1 = 0;
-//            bfh.bfReserved2 = 0;
-//            bfh.bfSize = 2+sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER)+width*height*3;
-//            bfh.bfOffBits = 0x36;
-//
-//            bih.biSize = sizeof(BITMAPINFOHEADER);
-//            bih.biWidth = width;
-//            bih.biHeight = height;
-//            bih.biPlanes = 1;
-//            bih.biBitCount = 24;
-//            bih.biCompression = 0;
-//            bih.biSizeImage = 0;
-//            bih.biSizeImage = 0;
-//            bih.biXPelsPerMeter = 5000;
-//            bih.biYPelsPerMeter = 5000;
-//            bih.biClrUsed = 0;
-//            bih.biClrImportant = 0;
-//
-//            FILE *file = fopen("/data/data/com.playground/files/temp2.bmp", "wb");
-//            if (!file)
-//            {
-//                printf("Could not write file\n");
-//                return;
-//            }
-//
-///*Write headers*/
-//            fwrite(&bfType,1,sizeof(bfType),file);
-//            fwrite(&bfh, 1, sizeof(bfh), file);
-//            fwrite(&bih, 1, sizeof(bih), file);
-//
-///*Write bitmap*/
-//            for (int y = bih.biHeight-1; y>=0; y--) /*Scanline loop backwards*/
-//            {
-//                for (int x = 0; x < bih.biWidth; x++) /*Column loop forwards*/
-//                {
-////                    auto index = y * bih.biWidth * 4 + x;
-////                    auto b = bytes[index + 0];
-////                    auto g = bytes[index + 1];
-////                    auto r = bytes[index + 2];
-//                    unsigned char r = 255*((float)x/bih.biWidth);
-//                    unsigned char g = 255*((float)y/bih.biHeight);
-//                    unsigned char b = 0;
-//                    fwrite(&b, 1, 1, file);
-//                    fwrite(&g, 1, 1, file);
-//                    fwrite(&r, 1, 1, file);
-//                }
-//            }
-//            fclose(file);
-//        }
-    
         std::string g_saveDir{};
     }
 
@@ -121,7 +40,10 @@ namespace Babylon::Plugins::Internal
             , m_runtime{JsRuntime::GetFromJavaScript(info.Env())}
             , m_graphicsImpl(Graphics::Impl::GetFromJavaScript(info.Env()))
             , m_ticket{std::make_unique<TicketT>(m_graphicsImpl.AddCaptureCallback([this](auto& data) { CaptureDataReceived(data); }))}
+            , m_jsData{Napi::Persistent(Napi::Object::New(info.Env()))}
         {
+            Napi::Object jsData = m_jsData.Value();
+            jsData.Set("data", Napi::ArrayBuffer::New(info.Env(), 0));
         }
 
         ~NativeCapture()
@@ -175,10 +97,34 @@ namespace Babylon::Plugins::Internal
             m_runtime.Dispatch([this, data{data}, bytes{std::move(bytes)}](Napi::Env env) mutable {
                 data.Data = bytes.data();
 
-                auto external = Napi::External<BgfxCallback::CaptureData>::New(env, &data);
+                Napi::Object jsData = m_jsData.Value();
+                jsData.Set("width", static_cast<double>(data.Width));
+                jsData.Set("height", static_cast<double>(data.Height));
+                jsData.Set("pitch", static_cast<double>(data.Pitch));
+                constexpr auto FORMAT_MEMBER_NAME = "format";
+                switch (data.Format)
+                {
+                    case bgfx::TextureFormat::BGRA8:
+                        jsData.Set(FORMAT_MEMBER_NAME, "BGRA8");
+                        break;
+                    default:
+                        jsData.Set(FORMAT_MEMBER_NAME, env.Undefined());
+                        break;
+                }
+                jsData.Set("yFlip", data.YFlip);
+
+                auto jsBytes = jsData.Get("data").As<Napi::ArrayBuffer>();
+                if (data.DataSize != jsBytes.ByteLength())
+                {
+                    jsBytes = Napi::ArrayBuffer::New(env, data.DataSize);
+                    jsData.Set("data", jsBytes);
+                }
+                std::memcpy(jsBytes.Data(), bytes.data(), data.DataSize);
+                bytes.clear();
+
                 for (const auto& callback : m_callbacks)
                 {
-                    callback.Call({external});
+                    callback.Call({jsData});
                 }
             });
         }
@@ -198,6 +144,7 @@ namespace Babylon::Plugins::Internal
         Graphics::Impl& m_graphicsImpl;
         std::vector<Napi::FunctionReference> m_callbacks{};
         std::unique_ptr<TicketT> m_ticket{};
+        Napi::ObjectReference m_jsData{};
     };
 }
 
