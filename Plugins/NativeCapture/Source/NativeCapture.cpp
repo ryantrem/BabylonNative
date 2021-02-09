@@ -90,6 +90,8 @@ namespace Babylon::Plugins::Internal
 //            }
 //            fclose(file);
 //        }
+    
+        std::string g_saveDir{};
     }
 
     class NativeCapture : public Napi::ObjectWrap<NativeCapture>
@@ -135,8 +137,10 @@ namespace Babylon::Plugins::Internal
     private:
         void AddCallback(const Napi::CallbackInfo& info)
         {
-            auto listener = info[0].As<Napi::Function>();
-            m_callbacks.push_back(Napi::Persistent(listener));
+            auto saveDir = info[0].As<Napi::String>();
+            g_saveDir = saveDir.Utf8Value().append("/temp.bmp");
+//            auto listener = info[0].As<Napi::Function>();
+//            m_callbacks.push_back(Napi::Persistent(listener));
         }
 
         void CaptureDataReceived(const BgfxCallback::CaptureData& data)
@@ -159,7 +163,11 @@ namespace Babylon::Plugins::Internal
                 // View this on the dev machine by doing the following in Android Studio:
                 // 1. Select: View -> Tool Windows -> Device File Explorer
                 // 2. Double click: data -> data -> com.playground -> files -> temp.bmp
-                bmp.save_image("/data/data/com.playground/files/temp.bmp");
+                //bmp.save_image("/data/data/com.playground/files/temp.bmp");
+
+                bmp.save_image(g_saveDir.c_str());
+                //bmp.save_image("Library/temp.bmp");
+                //bmp.save_image("/var/mobile/Containers/Data/Application/8FA3EDB0-67E6-4AD3-8295-EBAE1975EF07/Documents/temp.bmp");
             }
 
             //write_bitmap(data.Width, data.Height, bytes);
