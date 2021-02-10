@@ -1,5 +1,4 @@
 #include "NativeCapture.h"
-#include "Bitmap.hpp"
 
 #include <Babylon/JsRuntime.h>
 #include <GraphicsImpl.h>
@@ -59,10 +58,8 @@ namespace Babylon::Plugins::Internal
     private:
         void AddCallback(const Napi::CallbackInfo& info)
         {
-            auto saveDir = info[0].As<Napi::String>();
-            g_saveDir = saveDir.Utf8Value().append("/temp.bmp");
-//            auto listener = info[0].As<Napi::Function>();
-//            m_callbacks.push_back(Napi::Persistent(listener));
+            auto listener = info[0].As<Napi::Function>();
+            m_callbacks.push_back(Napi::Persistent(listener));
         }
 
         void CaptureDataReceived(const BgfxCallback::CaptureData& data)
@@ -70,29 +67,6 @@ namespace Babylon::Plugins::Internal
             std::vector<uint8_t> bytes{};
             bytes.resize(data.DataSize);
             std::memcpy(bytes.data(), data.Data, data.DataSize);
-
-            {
-                bitmap_image bmp{data.Width, data.Height};
-                bmp.clear();
-                for (uint32_t y = 0; y < data.Height; y++)
-                {
-                    for (uint32_t x = 0; x < data.Width; x++)
-                    {
-                        auto index = y * data.Width * 4 + x * 4;
-                        bmp.set_pixel(x, y, bytes[index + 2], bytes[index + 1], bytes[index]);
-                    }
-                }
-                // View this on the dev machine by doing the following in Android Studio:
-                // 1. Select: View -> Tool Windows -> Device File Explorer
-                // 2. Double click: data -> data -> com.playground -> files -> temp.bmp
-                //bmp.save_image("/data/data/com.playground/files/temp.bmp");
-
-                bmp.save_image(g_saveDir.c_str());
-                //bmp.save_image("Library/temp.bmp");
-                //bmp.save_image("/var/mobile/Containers/Data/Application/8FA3EDB0-67E6-4AD3-8295-EBAE1975EF07/Documents/temp.bmp");
-            }
-
-            //write_bitmap(data.Width, data.Height, bytes);
 
             m_runtime.Dispatch([this, data{data}, bytes{std::move(bytes)}](Napi::Env env) mutable {
                 data.Data = bytes.data();
