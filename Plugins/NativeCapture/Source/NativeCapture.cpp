@@ -7,11 +7,6 @@
 
 namespace Babylon::Plugins::Internal
 {
-    namespace
-    {
-        std::string g_saveDir{};
-    }
-
     class NativeCapture : public Napi::ObjectWrap<NativeCapture>
     {
         using TicketT = arcana::ticketed_collection<std::function<void(const BgfxCallback::CaptureData&)>>::ticket;
@@ -67,7 +62,6 @@ namespace Babylon::Plugins::Internal
             std::vector<uint8_t> bytes{};
             bytes.resize(data.DataSize);
             std::memcpy(bytes.data(), data.Data, data.DataSize);
-
             m_runtime.Dispatch([this, data{data}, bytes{std::move(bytes)}](Napi::Env env) mutable {
                 data.Data = bytes.data();
 
