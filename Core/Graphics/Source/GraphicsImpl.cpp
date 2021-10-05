@@ -3,9 +3,13 @@
 #include <Babylon/GraphicsPlatformImpl.h>
 #include <JsRuntimeInternalState.h>
 
+#include <os/signpost.h>
+
 namespace
 {
     constexpr auto JS_GRAPHICS_NAME = "_Graphics";
+
+    os_log_t s_log = os_log_create("Babylon Native", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
 }
 
 namespace Babylon
@@ -140,6 +144,7 @@ namespace Babylon
 
     void GraphicsImpl::StartRenderingCurrentFrame()
     {
+        os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "GraphicsImpl", "StartRenderingCurrentFrame - Invoked");
         assert(m_renderThreadAffinity.check());
 
         if (m_rendering)
@@ -158,10 +163,12 @@ namespace Babylon
         m_safeTimespanGuarantor.BeginSafeTimespan();
 
         m_beforeRenderScheduler.m_dispatcher.tick(*m_cancellationSource);
+        os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "GraphicsImpl", "StartRenderingCurrentFrame - Before Render Scheduler Ticked");
     }
 
     void GraphicsImpl::FinishRenderingCurrentFrame()
     {
+        os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "GraphicsImpl", "FinishRenderingCurrentFrame - Invoked");
         assert(m_renderThreadAffinity.check());
 
         if (!m_rendering)
@@ -171,9 +178,12 @@ namespace Babylon
 
         m_safeTimespanGuarantor.EndSafeTimespan();
 
+        os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "GraphicsImpl", "FinishRenderingCurrentFrame - Before Frame");
         Frame();
+        os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "GraphicsImpl", "FinishRenderingCurrentFrame - After Frame");
 
         m_afterRenderScheduler.m_dispatcher.tick(*m_cancellationSource);
+        os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "GraphicsImpl", "FinishRenderingCurrentFrame - After Render Scheduler Ticked");
 
         m_rendering = false;
     }

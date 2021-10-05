@@ -14,6 +14,8 @@
 #include <napi/napi.h>
 #include <arcana/threading/task.h>
 
+#include <os/signpost.h>
+
 namespace
 {
     bgfx::TextureFormat::Enum XrTextureFormatToBgfxFormat(xr::TextureFormat format)
@@ -316,6 +318,8 @@ namespace
         auto jsGamepadObject = Napi::Object::New(env);
         SetXRGamepadObjectData(jsInputSource, jsGamepadObject, inputSource);
     }
+
+    os_log_t s_log = os_log_create("Babylon Native", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
 }
 
 // NativeXr implementation proper.
@@ -567,27 +571,36 @@ namespace Babylon
             m_sessionState->ScheduleFrameCallbacks.emplace_back(callback);
 
             m_sessionState->FrameTask = arcana::make_task(m_sessionState->GraphicsImpl.BeforeRenderScheduler(), m_sessionState->CancellationSource, [this, thisRef{shared_from_this()}] {
+                //EndFrame();
+                os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - Before Render");
                 BeginFrame();
+                os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - After BeginFrame");
 
                 return arcana::make_task(m_runtimeScheduler, m_sessionState->CancellationSource, [this, updateToken{m_sessionState->GraphicsImpl.GetUpdateToken()}, thisRef{shared_from_this()}]() {
                     m_sessionState->FrameScheduled = false;
 
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - Before BeginUpdate");
                     BeginUpdate();
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - After BeginUpdate");
 
                     auto callbacks{std::move(m_sessionState->ScheduleFrameCallbacks)};
                     for (auto& callback : callbacks)
                     {
                         callback(*m_sessionState->Frame);
                     }
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - After Callback");
 
                     EndUpdate();
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - After EndUpdate");
                 }).then(arcana::inline_scheduler, m_sessionState->CancellationSource, [this, thisRef{shared_from_this()}](const arcana::expected<void, std::exception_ptr>& result) {
                     if (!m_sessionState->CancellationSource.cancelled() && result.has_error())
                     {
                         Napi::Error::New(m_env, result.error()).ThrowAsJavaScriptException();
                     }
                 }).then(m_sessionState->GraphicsImpl.AfterRenderScheduler(), arcana::cancellation::none(), [this, thisRef{shared_from_this()}](const arcana::expected<void, std::exception_ptr>&) {
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - Before EndFrame");
                     EndFrame();
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "ScheduleFrame - After EndFrame");
                 });
             });
         }
@@ -729,9 +742,9 @@ namespace Babylon
 
         void NativeXr::Impl::EndFrame()
         {
-            assert(m_sessionState != nullptr);
-            assert(m_sessionState->Session != nullptr);
-            assert(m_sessionState->Frame != nullptr);
+//            assert(m_sessionState != nullptr);
+//            assert(m_sessionState->Session != nullptr);
+//            assert(m_sessionState->Frame != nullptr);
 
             m_sessionState->Frame.reset();
         }
@@ -2874,15 +2887,20 @@ namespace Babylon
 
             Napi::Value RequestAnimationFrame(const Napi::CallbackInfo& info)
             {
+                os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "RequestAnimationFrame - Invoked");
                 Napi::Function callback{info[0].As<Napi::Function>()};
 
                 m_xr->ScheduleFrame([this, callbackPtr{std::make_shared<Napi::FunctionReference>(Napi::Persistent(callback))}](const auto& frame) {
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "RequestAnimationFrame - Schedule Frame Callback");
                     ProcessEyeInputSource(frame, Env());
                     ProcessControllerInputSources(frame, Env());
 
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "RequestAnimationFrame - Before Frame Update");
                     m_xrFrame.Update(Env(), frame, m_timestamp);
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "RequestAnimationFrame - After Frame Update");
 
                     callbackPtr->Value().Call({Napi::Value::From(Env(), m_timestamp), m_jsXRFrame.Value()});
+                    os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeXR", "RequestAnimationFrame - After JS Callback");
                 });
 
                 // The return value should be a request ID to allow for requesting cancellation, this is unused in Babylon.js currently.

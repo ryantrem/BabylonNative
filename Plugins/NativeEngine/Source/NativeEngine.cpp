@@ -23,6 +23,8 @@
 #include <sstream>
 #include <variant>
 
+#include <os/signpost.h>
+
 namespace Babylon
 {
     namespace
@@ -300,6 +302,8 @@ namespace Babylon
             texture->Handle = bgfx::createTexture2D((uint16_t)texture->Width, (uint16_t)texture->Height, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_BLIT_DST);
             texture->CreationFlags |= BGFX_TEXTURE_BLIT_DST;
         }
+    
+        os_log_t s_log = os_log_create("Babylon Native", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
     }
 
     IndexBufferData::IndexBufferData(const Napi::TypedArray& bytes, uint16_t flags, bool dynamic)
@@ -724,6 +728,9 @@ namespace Babylon
 
     void NativeEngine::RequestAnimationFrame(const Napi::CallbackInfo& info)
     {
+        unsigned long long sid = os_signpost_id_generate(s_log);
+        os_signpost_event_emit(s_log, sid, "NativeEngine", "RequestAnimationFrame - Invoked");
+
         auto callback{info[0].As<Napi::Function>()};
 
         m_requestAnimationFrameCallbacks.emplace_back(Napi::Persistent(callback));
@@ -1959,8 +1966,12 @@ namespace Babylon
 
         m_requestAnimationFrameCallbacksScheduled = true;
 
+        os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeEngine", "ScheduleRequestAnimationFrameCallbacks - Invoked");
+
         arcana::make_task(m_graphicsImpl.BeforeRenderScheduler(), *m_cancellationSource, [this, cancellationSource{m_cancellationSource}]() {
+            os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeEngine", "ScheduleRequestAnimationFrameCallbacks - BeforeRender");
             return arcana::make_task(m_runtimeScheduler, *m_cancellationSource, [this, updateToken{m_graphicsImpl.GetUpdateToken()}, cancellationSource{m_cancellationSource}]() {
+                os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeEngine", "ScheduleRequestAnimationFrameCallbacks - Before Animation Frame Callback");
                 m_requestAnimationFrameCallbacksScheduled = false;
 
                 auto callbacks{std::move(m_requestAnimationFrameCallbacks)};
@@ -1968,7 +1979,9 @@ namespace Babylon
                 {
                     callback.Value().Call({});
                 }
+                os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeEngine", "ScheduleRequestAnimationFrameCallbacks - After Animation Frame Callback");
             }).then(arcana::inline_scheduler, *m_cancellationSource, [this, cancellationSource{m_cancellationSource}](const arcana::expected<void, std::exception_ptr>& result) {
+                os_signpost_event_emit(s_log, os_signpost_id_generate(s_log), "NativeEngine", "ScheduleRequestAnimationFrameCallbacks - Error Check");
                 if (!cancellationSource->cancelled() && result.has_error())
                 {
                     Napi::Error::New(Env(), result.error()).ThrowAsJavaScriptException();
