@@ -31,3 +31,6 @@
 [submodule "Dependencies/llhttp"]
 	path = Dependencies/v8inspector/Dependencies/llhttp
 	url = https://github.com/nodejs/llhttp
+[submodule "Dependencies/wasm3"]
+	path = Dependencies/wasm3
+	url = https://github.com/wasm3/wasm3.git

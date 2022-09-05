@@ -166,6 +166,15 @@ if(BABYLON_NATIVE_POLYFILL_XMLHTTPREQUEST)
     set_property(TARGET UrlLib PROPERTY FOLDER Dependencies)
 endif()
 
+# -------------------------------- wasm3 --------------------------------
+# Dependencies: none
+if(BABYLON_NATIVE_POLYFILL_WEBASSEMBLY)
+    add_subdirectory(wasm3/source)
+    set_property(TARGET m3 PROPERTY FOLDER Dependencies/wasm3)
+    add_subdirectory(wasm3/platforms/cpp/wasm3_cpp)
+    set_property(TARGET wasm3_cpp PROPERTY FOLDER Dependencies/wasm3)
+endif()
+
 # --------------------------- v8inspector ---------------------------
 # Dependencies: none
 # Currently only supported on Win32 x86/x64 and Android

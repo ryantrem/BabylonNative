@@ -13,3 +13,7 @@ endif()
 if(BABYLON_NATIVE_POLYFILL_CANVAS)
     add_subdirectory(Canvas)
 endif()
+
+if(BABYLON_NATIVE_POLYFILL_WEBASSEMBLY)
+    add_subdirectory(WebAssembly)
+endif()

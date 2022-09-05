@@ -23,6 +23,7 @@
 #include <Babylon/Polyfills/Window.h>
 #include <Babylon/Polyfills/XMLHttpRequest.h>
 #include <Babylon/Polyfills/Canvas.h>
+#include <Babylon/Polyfills/WebAssembly.h>
 
 #define MAX_LOADSTRING 100
 
@@ -134,6 +135,8 @@ namespace
 
             Babylon::Polyfills::XMLHttpRequest::Initialize(env);
             nativeCanvas = std::make_unique <Babylon::Polyfills::Canvas>(Babylon::Polyfills::Canvas::Initialize(env));
+
+            Babylon::Polyfills::WebAssembly::Initialize(env);
 
             Babylon::Plugins::NativeEngine::Initialize(env);
 

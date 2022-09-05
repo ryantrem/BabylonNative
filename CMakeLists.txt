@@ -33,6 +33,7 @@ option(BABYLON_NATIVE_POLYFILL_CONSOLE "Include Babylon Native Polyfill Console.
 option(BABYLON_NATIVE_POLYFILL_WINDOW "Include Babylon Native Polyfill Window." ON)
 option(BABYLON_NATIVE_POLYFILL_XMLHTTPREQUEST "Include Babylon Native Polyfill XMLHttpRequest." ON)
 option(BABYLON_NATIVE_POLYFILL_CANVAS "Include Babylon Native Polyfill Canvas." ON)
+option(BABYLON_NATIVE_POLYFILL_WEBASSEMBLY "Include Babylon Native Polyfill WebAssembly." ON)
 # --------------------------------------------------
 
 if(APPLE)
