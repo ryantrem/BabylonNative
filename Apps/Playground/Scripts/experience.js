@@ -18,6 +18,27 @@ var hololens = false;
 var cameraTexture = false;
 var imageTracking = false;
 const readPixels = false;
+const wasm = true;
+
+if (wasm) {
+    const byteCode = new Uint8Array([
+        0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F, 0x03, 0x02, 0x01, 0x00, 0x07, 0x0A, 0x01, 0x06, 0x61, 0x64, 0x64, 0x54, 0x77, 0x6F, 0x00, 0x00, 0x0A, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6A, 0x0B, 0x00, 0x0A, 0x04, 0x6E, 0x61, 0x6D, 0x65, 0x02, 0x03, 0x01, 0x00, 0x00
+    ]);
+    console.log("Compiling module...");
+    const module = WebAssembly.compile(byteCode).then(module => {
+        return WebAssembly.instantiate(module);
+    }).then(instance => {
+        const [left, right] = [10,35];
+        const sum = instance.exports.addTwo(left,right);
+        console.log(`${left} + ${right} = ${sum}`);
+    });
+//     console.log("Instantiating module...");
+//     const instance = await WebAssembly.instantiate(module);
+//     const [left, right] = [10,35];
+//     console.log("Invoking export...");
+//     const sum = instance.exports.addTwo(left,right);
+//     console.log(`${left} + ${right} = ${sum}`);
+}
 
 function CreateBoxAsync(scene) {
     BABYLON.Mesh.CreateBox("box1", 0.2, scene);
