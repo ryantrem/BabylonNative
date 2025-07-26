@@ -11,6 +11,8 @@ set(DEPENDENCIES
     "../Dependencies/meshwriter.min.js"
     "../Dependencies/recast.js")
 
+file(GLOB_RECURSE ASSETS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "Assets/*")
+
 set(SCRIPTS
     "Scripts/experience.js"
     "Scripts/playground_runner.js"
@@ -25,7 +27,7 @@ if(APPLE)
         set(STORYBOARD
             "${CMAKE_CURRENT_LIST_DIR}/iOS/Base.lproj/Main.storyboard"
             "${CMAKE_CURRENT_LIST_DIR}/iOS/Base.lproj/LaunchScreen.storyboard")
-        set(RESOURCE_FILES ${STORYBOARD} ${SCRIPTS})
+        set(RESOURCE_FILES ${STORYBOARD} ${SCRIPTS} ${ASSETS})
         set(ADDITIONAL_LIBRARIES PRIVATE z NativeXr)
         set(SOURCES
             ${SOURCES}
@@ -36,11 +38,12 @@ if(APPLE)
             "AppleShared/GestureRecognizer.swift")
         set_source_files_properties(${SCRIPTS} ${BABYLON_SCRIPTS} ${DEPENDENCIES} PROPERTIES MACOSX_PACKAGE_LOCATION "Scripts")
         set_source_files_properties(${REFERENCE_IMAGES} PROPERTIES MACOSX_PACKAGE_LOCATION "ReferenceImages")
+        set_source_files_properties(${ASSETS} PROPERTIES MACOSX_PACKAGE_LOCATION "Assets")
         set(ADDITIONAL_LIBRARIES ${ADDITIONAL_LIBRARIES} PRIVATE NativeCamera)
     elseif(VISIONOS)
         set(PLIST_FILE
             "${CMAKE_CURRENT_LIST_DIR}/visionOS/Info.plist")
-        set(RESOURCE_FILES ${SCRIPTS})
+        set(RESOURCE_FILES ${SCRIPTS} ${ASSETS})
         set(SOURCES
             ${SOURCES}
             "visionOS/App.swift"
@@ -49,6 +52,7 @@ if(APPLE)
             "AppleShared/GestureRecognizer.swift")
         set_source_files_properties(${SCRIPTS} ${BABYLON_SCRIPTS} ${DEPENDENCIES} PROPERTIES MACOSX_PACKAGE_LOCATION "Scripts")
         set_source_files_properties(${REFERENCE_IMAGES} PROPERTIES MACOSX_PACKAGE_LOCATION "ReferenceImages")
+        set_source_files_properties(${ASSETS} PROPERTIES MACOSX_PACKAGE_LOCATION "Assets")
     else()
         set(PLIST_FILE "${CMAKE_CURRENT_LIST_DIR}/macOS/Info.plist")
         set(STORYBOARD "${CMAKE_CURRENT_LIST_DIR}/macOS/Base.lproj/Main.storyboard")
@@ -63,6 +67,7 @@ if(APPLE)
             "macOS/ViewController.h")
         set_source_files_properties(${SCRIPTS} ${BABYLON_SCRIPTS} ${DEPENDENCIES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/Scripts")
         set_source_files_properties(${REFERENCE_IMAGES} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/ReferenceImages")
+        set_source_files_properties(${ASSETS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/Assets")
     endif()
     set(ADDITIONAL_LIBRARIES ${ADDITIONAL_LIBRARIES} PRIVATE ${JAVASCRIPTCORE_LIBRARY})
     set(RESOURCE_FILES ${STORYBOARD})
@@ -108,9 +113,9 @@ endif()
 
 if(WIN32)
     set(WIN32_EXECUTABLE TRUE)
-    add_executable(Playground WIN32 ${REFERENCE_IMAGES} ${BABYLON_SCRIPTS} ${DEPENDENCIES} ${SCRIPTS} ${SOURCES} ${RESOURCE_FILES})
+    add_executable(Playground WIN32 ${REFERENCE_IMAGES} ${BABYLON_SCRIPTS} ${DEPENDENCIES} ${SCRIPTS} ${ASSETS} ${SOURCES} ${RESOURCE_FILES})
 else()
-    add_executable(Playground ${REFERENCE_IMAGES} ${BABYLON_SCRIPTS} ${DEPENDENCIES} ${SCRIPTS} ${SOURCES} ${RESOURCE_FILES})
+    add_executable(Playground ${REFERENCE_IMAGES} ${BABYLON_SCRIPTS} ${DEPENDENCIES} ${SCRIPTS} ${ASSETS} ${SOURCES} ${RESOURCE_FILES})
 endif()
 
 warnings_as_errors(Playground)
@@ -221,6 +226,7 @@ endif()
 if(WINDOWS_STORE)
     set_property(SOURCE ${SCRIPTS} ${BABYLON_SCRIPTS} ${DEPENDENCIES} PROPERTY VS_DEPLOYMENT_CONTENT 1)
     set_property(SOURCE ${SCRIPTS} ${BABYLON_SCRIPTS} ${DEPENDENCIES} PROPERTY VS_DEPLOYMENT_LOCATION "Scripts")
+    set_property(SOURCE ${ASSETS} PROPERTY VS_DEPLOYMENT_LOCATION "Assets")
         set_property(SOURCE ${REFERENCE_IMAGES} PROPERTY VS_DEPLOYMENT_LOCATION "ReferenceImages")
 else()
     foreach(SCRIPT ${SCRIPTS} ${BABYLON_SCRIPTS} ${DEPENDENCIES})
@@ -239,6 +245,14 @@ else()
             COMMENT "Copying ${IMAGE_NAME}"
             MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/${IMAGE}")
     endforeach()
+    foreach(ASSET ${ASSETS})
+        get_filename_component(ASSET_NAME "${ASSET}" NAME)
+        add_custom_command(
+            OUTPUT "${CMAKE_CFG_INTDIR}/Assets/${ASSET_NAME}"
+            COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_SOURCE_DIR}/${ASSET}" "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/Assets/${ASSET_NAME}"
+            COMMENT "Copying ${ASSET_NAME}"
+            MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/${ASSET}")
+    endforeach()
 endif()
 
 set_property(TARGET Playground PROPERTY FOLDER Apps)
@@ -246,6 +260,7 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/../node_modules PREFIX Scripts FIL
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/../Dependencies PREFIX Scripts FILES ${DEPENDENCIES})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${REFERENCE_IMAGES})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SCRIPTS})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${ASSETS})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})
 set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT Playground)
 
