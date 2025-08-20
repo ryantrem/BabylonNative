@@ -10,6 +10,9 @@ get_filename_component(REPO_ROOT_DIR "${PLAYGROUND_DIR}/../.." ABSOLUTE)
 
 add_subdirectory(${REPO_ROOT_DIR} "${CMAKE_CURRENT_BINARY_DIR}/BabylonNative")
 
+if(BABYLON_DEBUG_TRACE)
+    add_compile_definitions(BABYLON_DEBUG_TRACE)
+endif()
 
 add_library(BabylonNativeJNI SHARED
     src/main/cpp/BabylonNativeJNI.cpp)

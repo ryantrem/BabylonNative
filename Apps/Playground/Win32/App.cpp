@@ -10,6 +10,7 @@
 #include <iostream>
 #include <optional>
 #include <sstream>
+#include <fstream>
 
 #include <Babylon/AppRuntime.h>
 #include <Babylon/Graphics/Device.h>
@@ -28,6 +29,13 @@
 #include <Babylon/DebugTrace.h>
 
 #define MAX_LOADSTRING 100
+#define ENABLE_PERSISTENT_SHADER_CACHE 1
+#ifdef BABYLON_DEBUG_TRACE
+#   define ON_DEBUG_TRACE(x) x
+#else
+#   define ON_DEBUG_TRACE(x)
+#endif
+
 
 // Global Variables:
 HINSTANCE hInst;                     // current instance
@@ -40,6 +48,7 @@ Babylon::Plugins::NativeInput* nativeInput{};
 std::optional<Babylon::Polyfills::Canvas> nativeCanvas{};
 bool minimized{false};
 int buttonRefCount{0};
+const char* shaderCacheFileName = "PlaygroundShaderCache.bin";
 
 // Forward declarations of functions included in this code module:
 ATOM MyRegisterClass(HINSTANCE hInstance);
@@ -100,6 +109,23 @@ namespace
 
     void Uninitialize()
     {
+    #if ENABLE_PERSISTENT_SHADER_CACHE
+        // Try to save the shader cache, but only if have some shaders as Uninitialize called first on init 
+        if(device && Babylon::ShaderCache::Enabled())
+        {
+            std::ofstream fileSerialize(shaderCacheFileName, std::ios::binary);
+            if (fileSerialize.good())
+            {
+                ON_DEBUG_TRACE( uint32_t shaderCount = ) Babylon::ShaderCache::Serialize(fileSerialize);
+                DEBUG_TRACE("Saved %d shaders to %s", shaderCount, shaderCacheFileName);
+            }
+            else
+            {
+                DEBUG_TRACE("Could not save shaders to %s", shaderCacheFileName);
+            }
+        }
+    #endif   
+
         if (device)
         {
             update->Finish();
@@ -142,6 +168,18 @@ namespace
         update.emplace(device->GetUpdate("update"));
 
         Babylon::ShaderCache::Enabled(true);
+
+    #if ENABLE_PERSISTENT_SHADER_CACHE
+        // see if we can prime the ShaderCache from last run
+        {
+            std::ifstream file(shaderCacheFileName, std::ios::binary);
+            if (file.good())
+            {
+                ON_DEBUG_TRACE( uint32_t deserializedCount = ) Babylon::ShaderCache::Deserialize(file);
+                DEBUG_TRACE("Loaded %d shaders from %s", deserializedCount, shaderCacheFileName);
+            }
+        }
+    #endif   
 
         device->StartRenderingCurrentFrame();
         update->Start();

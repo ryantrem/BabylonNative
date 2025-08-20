@@ -97,7 +97,7 @@ public class BabylonView extends FrameLayout implements SurfaceHolder.Callback2,
      * not normally called or subclassed by clients of BabylonView.
      */
     public void surfaceCreated(SurfaceHolder holder) {
-        Wrapper.surfaceCreated(holder.getSurface(), this.getContext());
+        Wrapper.surfaceCreated(holder.getSurface(), this.getContext(), this.mCurrentActivity.getCacheDir().getAbsolutePath());
         Wrapper.setCurrentActivity(this.mCurrentActivity);
         if (!this.mViewReady) {
             this.mViewDelegate.onViewReady();

@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <time.h>
 #include <optional>
+#include <fstream>
 
 #include <AndroidExtensions/Globals.h>
 #include <Babylon/AppRuntime.h>
@@ -22,7 +23,16 @@
 #include <Babylon/Polyfills/Window.h>
 #include <Babylon/Polyfills/XMLHttpRequest.h>
 #include <Babylon/Polyfills/Canvas.h>
-#include "Babylon/DebugTrace.h"
+#include <Babylon/DebugTrace.h>
+#include <Babylon/ShaderCache.h>
+
+#define ENABLE_PERSISTENT_SHADER_CACHE 1
+
+#ifdef BABYLON_DEBUG_TRACE
+#   define ON_DEBUG_TRACE(x) x
+#else
+#   define ON_DEBUG_TRACE(x)
+#endif
 
 namespace
 {
@@ -34,6 +44,9 @@ namespace
     std::optional<Babylon::Polyfills::Canvas> nativeCanvas{};
     std::optional<Babylon::ScriptLoader> scriptLoader{};
     bool isXrActive{};
+
+    const char* shaderCacheFileName = "PlaygroundShaderCache.bin";
+    std::string appCachePath;
 }
 
 extern "C"
@@ -43,9 +56,31 @@ extern "C"
     {
     }
 
+    void SaveShaderCache()
+    {
+#if ENABLE_PERSISTENT_SHADER_CACHE
+        // Try to save the shader cache, but only if have some shaders as Uninitialize called first on init
+        if (device && Babylon::ShaderCache::Enabled() && !appCachePath.empty())
+        {
+            std::ofstream fileSerialize(appCachePath, std::ios::binary);
+            if (fileSerialize.good())
+            {
+                ON_DEBUG_TRACE( uint32_t shaderCount = ) Babylon::ShaderCache::Serialize(fileSerialize);
+                DEBUG_TRACE("Saved %d shaders to %s", shaderCount, appCachePath.c_str());
+            }
+            else
+            {
+                DEBUG_TRACE("Could not save shaders to %s", appCachePath.c_str());
+            }
+        }
+#endif   
+    }
+
     JNIEXPORT void JNICALL
     Java_com_library_babylonnative_Wrapper_finishEngine(JNIEnv* env, jclass clazz)
     {
+        SaveShaderCache();
+
         if (device)
         {
             deviceUpdate->Finish();
@@ -64,7 +99,7 @@ extern "C"
     }
 
     JNIEXPORT void JNICALL
-    Java_com_library_babylonnative_Wrapper_surfaceCreated(JNIEnv* env, jclass clazz, jobject surface, jobject context)
+    Java_com_library_babylonnative_Wrapper_surfaceCreated(JNIEnv* env, jclass clazz, jobject surface, jobject context, jstring cacheDir)
     {
         if (!runtime)
         {
@@ -77,7 +112,7 @@ extern "C"
             android::global::Initialize(javaVM, context);
 
             Babylon::DebugTrace::EnableDebugTrace(true);
-            Babylon::DebugTrace::SetTraceOutput([](const char* trace) { printf("%s\n", trace); fflush(stdout); });
+            Babylon::DebugTrace::SetTraceOutput([](const char* trace) { __android_log_write(ANDROID_LOG_INFO, "BabylonNative",trace);});
 
             ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
             int32_t width  = ANativeWindow_getWidth(window);
@@ -89,6 +124,32 @@ extern "C"
             graphicsConfig.Height = static_cast<size_t>(height);
             device.emplace(graphicsConfig);
             deviceUpdate.emplace(device->GetUpdate("update"));
+
+            Babylon::ShaderCache::Enabled(true);
+
+        #if ENABLE_PERSISTENT_SHADER_CACHE
+            // see if we can prime the ShaderCache from last run
+            {
+                const char *cacheDirStr = env->GetStringUTFChars(cacheDir, nullptr);
+
+                appCachePath = cacheDirStr;
+                appCachePath.append("/");
+                appCachePath.append(shaderCacheFileName);
+                env->ReleaseStringUTFChars(cacheDir, cacheDirStr);
+
+                std::ifstream file(appCachePath, std::ios::binary);
+                if (file.good())
+                {
+                    ON_DEBUG_TRACE(uint32_t deserializedCount = ) Babylon::ShaderCache::Deserialize(file);
+                    DEBUG_TRACE("Loaded %d shaders from %s", deserializedCount, appCachePath.c_str());
+                }
+                else
+                {
+                    DEBUG_TRACE("Could not load shaders from %s", appCachePath.c_str());
+                }
+             }
+        #endif
+
             device->StartRenderingCurrentFrame();
             deviceUpdate->Start();
 
@@ -161,6 +222,8 @@ extern "C"
     JNIEXPORT void JNICALL
     Java_com_library_babylonnative_Wrapper_activityOnPause(JNIEnv* env, jclass clazz)
     {
+        SaveShaderCache();
+        
         android::global::Pause();
         if (runtime)
         {
