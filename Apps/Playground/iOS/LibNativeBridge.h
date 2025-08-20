@@ -8,7 +8,7 @@
 
 - (instancetype)init;
 - (void)dealloc;
-
+- (void)terminate;
 - (void)init:(MTKView*)inView screenScale:(float)inScreenScale width:(int)inWidth height:(int)inHeight xrView:(void*)xrView;
 - (void)resize:(int)inWidth height:(int)inHeight;
 - (void)render;

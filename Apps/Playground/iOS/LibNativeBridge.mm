@@ -12,8 +12,17 @@
 #import <Babylon/Polyfills/Console.h>
 #import <Babylon/Polyfills/Window.h>
 #import <Babylon/Polyfills/XMLHttpRequest.h>
+#import <Babylon/ShaderCache.h>
 #import <Babylon/DebugTrace.h>
 #import <optional>
+#import <fstream>
+
+#define ENABLE_PERSISTENT_SHADER_CACHE 1
+#ifdef BABYLON_DEBUG_TRACE
+#define ON_DEBUG_TRACE(x) x
+#else
+#define ON_DEBUG_TRACE(x)
+#endif
 
 std::optional<Babylon::Graphics::Device> device{};
 std::optional<Babylon::Graphics::DeviceUpdate> update{};
@@ -23,6 +32,7 @@ std::optional<Babylon::Plugins::NativeXr> nativeXr{};
 Babylon::Plugins::NativeInput* nativeInput{};
 bool isXrActive{};
 float screenScale{1.0f};
+std::string appCacheFilePath;
 
 @implementation LibNativeBridge
 
@@ -30,6 +40,34 @@ float screenScale{1.0f};
 {
     self = [super init];
     return self;
+}
+
+- (void)saveShaderCache
+{
+#if ENABLE_PERSISTENT_SHADER_CACHE
+   // Try to save the shader cache, but only if have some shaders as Uninitialize called first on init
+   if (device && Babylon::ShaderCache::Enabled() && !appCacheFilePath.empty())
+   {
+       std::ofstream fileSerialize(appCacheFilePath, std::ios::binary);
+       if (fileSerialize.good())
+       {
+           ON_DEBUG_TRACE( uint32_t shaderCount = ) Babylon::ShaderCache::Serialize(fileSerialize);
+           DEBUG_TRACE("Saved %d shaders to %s", shaderCount, appCacheFilePath.c_str());
+       }
+       else
+       {
+           DEBUG_TRACE("Could not save shaders to %s", appCacheFilePath.c_str());
+       }
+   }
+#endif
+}
+
+// called from applicationWillTerminate
+- (void)terminate
+{
+    [self saveShaderCache];
+    
+    // would normally call dealloc here too, but will trigger exceptions currently when called on iOS during termination
 }
 
 - (void)dealloc
@@ -65,6 +103,32 @@ float screenScale{1.0f};
     device.emplace(graphicsConfig);
     update.emplace(device->GetUpdate("update"));
 
+    Babylon::ShaderCache::Enabled(true);
+    
+#if ENABLE_PERSISTENT_SHADER_CACHE
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+    NSString *cacheDirectory = [paths objectAtIndex:0];
+    if (cacheDirectory)
+    {
+        appCacheFilePath = [cacheDirectory UTF8String];
+        appCacheFilePath.append("/");
+        appCacheFilePath.append("PlaygroundShaderCache.bin");
+    }
+    if (!appCacheFilePath.empty())
+    {
+        std::ifstream file(appCacheFilePath, std::ios::binary);
+        if (file.good())
+        {
+            ON_DEBUG_TRACE( uint32_t deserializedCount = ) Babylon::ShaderCache::Deserialize(file);
+            DEBUG_TRACE("Loaded %d shaders from %s", deserializedCount, appCacheFilePath.c_str());
+        }
+        else
+        {
+            DEBUG_TRACE("Could not load shaders from %s", appCacheFilePath.c_str());
+        }
+    }
+#endif
+    
     device->StartRenderingCurrentFrame();
     update->Start();
 
