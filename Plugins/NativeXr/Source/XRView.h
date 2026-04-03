@@ -55,6 +55,8 @@ namespace Babylon
             m_isFirstPersonObserver = isFirstPersonObserver;
         }
 
+        size_t EyeIndex() const { return m_eyeIdx; }
+
     private:
         size_t m_eyeIdx{};
         gsl::czstring m_eye{};

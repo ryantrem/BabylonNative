@@ -78,6 +78,11 @@ namespace Babylon
                 m_sessionState->Session->CreateAugmentedImageDatabase(requests);
             }
 
+            void SetDepthSensingEnabled(bool enabled)
+            {
+                m_sessionState->Session->SetDepthSensingEnabled(enabled);
+            }
+
             uintptr_t GetNativeXrContext()
             {
                 return m_system.GetNativeXrContext();

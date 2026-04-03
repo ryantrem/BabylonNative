@@ -234,6 +234,8 @@ namespace Babylon
                     InstanceMethod("trySetMeshDetectorEnabled", &XRSession::TrySetMeshDetectorEnabled),
                     InstanceMethod("trySetPreferredMeshDetectorOptions", &XRSession::TrySetPreferredMeshDetectorOptions),
                     InstanceMethod("getTrackedImageScores", &XRSession::GetTrackedImageScores),
+                    InstanceAccessor("depthUsage", &XRSession::GetDepthUsage, nullptr),
+                    InstanceAccessor("depthDataFormat", &XRSession::GetDepthDataFormat, nullptr),
                 });
 
             env.Global().Set(JS_CLASS_NAME, func);
@@ -277,6 +279,42 @@ namespace Babylon
                 }
             }
 
+            if (featureObject.Has("depthSensing"))
+            {
+                auto depthConfig = featureObject.Get("depthSensing").As<Napi::Object>();
+
+                if (depthConfig.Has("usagePreference"))
+                {
+                    auto usages = depthConfig.Get("usagePreference").As<Napi::Array>();
+                    for (uint32_t i = 0; i < usages.Length(); i++)
+                    {
+                        auto usage = usages.Get(i).As<Napi::String>().Utf8Value();
+                        if (usage == "cpu-optimized")
+                        {
+                            session.m_depthUsage = "cpu-optimized";
+                            break;
+                        }
+                    }
+                }
+
+                if (depthConfig.Has("dataFormatPreference"))
+                {
+                    auto formats = depthConfig.Get("dataFormatPreference").As<Napi::Array>();
+                    for (uint32_t i = 0; i < formats.Length(); i++)
+                    {
+                        auto fmt = formats.Get(i).As<Napi::String>().Utf8Value();
+                        if (fmt == "luminance-alpha")
+                        {
+                            session.m_depthDataFormat = "luminance-alpha";
+                            break;
+                        }
+                    }
+                }
+
+                session.m_depthSensingEnabled =
+                    !session.m_depthUsage.empty() && !session.m_depthDataFormat.empty();
+            }
+
             auto deferred{ Napi::Promise::Deferred::New(info.Env()) };
             session.m_xr->BeginSessionAsync()
                 .then(session.m_runtimeScheduler, arcana::cancellation::none(),
@@ -287,6 +325,11 @@ namespace Babylon
                 }
                 else
                 {
+                    auto& resolvedSession{ *XRSession::Unwrap(jsSession.Value()) };
+                    if (resolvedSession.m_depthSensingEnabled)
+                    {
+                        resolvedSession.m_xr->SetDepthSensingEnabled(true);
+                    }
                     deferred.Resolve(jsSession.Value());
                 }
             });
@@ -547,6 +590,7 @@ namespace Babylon
                 ProcessEyeInputSource(*frame.get(), Env());
                 ProcessControllerInputSources(*frame.get(), Env());
 
+                m_xrFrame.SetDepthSensingEnabled(m_depthSensingEnabled);
                 m_xrFrame.Update(Env(), frame, m_timestamp);
 
                 if (m_imageTrackingRequests.size() > 0)
@@ -760,6 +804,24 @@ namespace Babylon
             }
 
             return results;
+        }
+
+        Napi::Value XRSession::GetDepthUsage(const Napi::CallbackInfo& info)
+        {
+            if (!m_depthSensingEnabled)
+            {
+                return info.Env().Null();
+            }
+            return Napi::String::New(info.Env(), m_depthUsage);
+        }
+
+        Napi::Value XRSession::GetDepthDataFormat(const Napi::CallbackInfo& info)
+        {
+            if (!m_depthSensingEnabled)
+            {
+                return info.Env().Null();
+            }
+            return Napi::String::New(info.Env(), m_depthDataFormat);
         }
      } // Plugins
 } // Babylon

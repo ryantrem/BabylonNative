@@ -688,6 +688,8 @@ namespace xr {
         float DepthNearZ{ DEFAULT_DEPTH_NEAR_Z };
         float DepthFarZ{ DEFAULT_DEPTH_FAR_Z };
         bool FeaturePointCloudEnabled{ false };
+        bool DepthSensingEnabled{ false };
+        std::vector<Frame::DepthSensingData> DepthSensingFrameData;
 
         Impl(System::Impl& systemImpl, void* graphicsContext, void* commandQueue, std::function<void*()> windowProvider)
             : SystemImpl{ systemImpl }
@@ -702,6 +704,13 @@ namespace xr {
             if (@available(iOS 13.4, *)) {
                 if ([ARWorldTrackingConfiguration supportsSceneReconstruction: ARSceneReconstructionMesh]) {
                     configuration.sceneReconstruction = ARSceneReconstructionMesh;
+                }
+            }
+#endif
+#if (__IPHONE_OS_VERSION_MAX_ALLOWED >= 140000)
+            if (@available(iOS 14.0, *)) {
+                if ([ARWorldTrackingConfiguration supportsFrameSemantics:ARFrameSemanticSceneDepth]) {
+                    configuration.frameSemantics |= ARFrameSemanticSceneDepth;
                 }
             }
 #endif
@@ -1312,6 +1321,86 @@ namespace xr {
             }
         }
 
+        void UpdateDepthSensing() {
+            if (!DepthSensingEnabled) {
+                DepthSensingFrameData.clear();
+                return;
+            }
+
+            DepthSensingFrameData.resize(ActiveFrameViews.size());
+
+#if (__IPHONE_OS_VERSION_MAX_ALLOWED >= 140000)
+            if (@available(iOS 14.0, *)) {
+                ARFrame* currentFrame = SystemImpl.XrContext->Frame;
+                ARDepthData* sceneDepth = currentFrame.sceneDepth;
+
+                if (sceneDepth == nil) {
+                    for (auto& d : DepthSensingFrameData) {
+                        d.HasData = false;
+                    }
+                    return;
+                }
+
+                CVPixelBufferRef depthMap = sceneDepth.depthMap;
+                CVPixelBufferLockBaseAddress(depthMap, kCVPixelBufferLock_ReadOnly);
+
+                size_t width = CVPixelBufferGetWidth(depthMap);
+                size_t height = CVPixelBufferGetHeight(depthMap);
+                size_t bytesPerRow = CVPixelBufferGetBytesPerRow(depthMap);
+                float* floatData = (float*)CVPixelBufferGetBaseAddress(depthMap);
+
+                auto& depthData = DepthSensingFrameData[0];
+                depthData.Width = static_cast<uint32_t>(width);
+                depthData.Height = static_cast<uint32_t>(height);
+                depthData.RawValueToMeters = 0.001f;
+                depthData.HasData = true;
+                depthData.DepthBuffer.resize(width * height);
+
+                // Convert float32 meters → uint16 millimeters
+                for (size_t r = 0; r < height; r++) {
+                    const float* row = (const float*)((uint8_t*)floatData + r * bytesPerRow);
+                    for (size_t c = 0; c < width; c++) {
+                        float meters = row[c];
+                        depthData.DepthBuffer[r * width + c] =
+                            static_cast<uint16_t>(std::min(meters * 1000.0f, 65535.0f));
+                    }
+                }
+
+                CVPixelBufferUnlockBaseAddress(depthMap, kCVPixelBufferLock_ReadOnly);
+
+                // Compute normDepthBufferFromNormView from display transform
+                CGAffineTransform displayTransform = [currentFrame
+                    displayTransformForOrientation:UIInterfaceOrientationPortrait
+                    viewportSize:CGSizeMake(depthData.Width, depthData.Height)];
+
+                depthData.NormDepthBufferFromNormView = {
+                    static_cast<float>(displayTransform.a),
+                    static_cast<float>(displayTransform.c),
+                    0, 0,
+                    static_cast<float>(displayTransform.b),
+                    static_cast<float>(displayTransform.d),
+                    0, 0,
+                    0, 0, 1, 0,
+                    static_cast<float>(displayTransform.tx),
+                    static_cast<float>(displayTransform.ty),
+                    0, 1
+                };
+            } else {
+                for (auto& d : DepthSensingFrameData) {
+                    d.HasData = false;
+                }
+            }
+#else
+            for (auto& d : DepthSensingFrameData) {
+                d.HasData = false;
+            }
+#endif
+
+            for (size_t i = 1; i < DepthSensingFrameData.size(); i++) {
+                DepthSensingFrameData[i].HasData = false;
+            }
+        }
+
         Frame::Plane& GetPlaneByID(Frame::Plane::Identifier planeID)
         {
             const auto end{Planes.end()};
@@ -1724,6 +1813,7 @@ namespace xr {
         , UpdatedMeshes{}
         , RemovedMeshes{}
         , UpdatedImageTrackingResults{}
+        , DepthSensingViews{}
         , IsTracking{sessionImpl.IsTracking()}
         , m_impl{ std::make_unique<System::Session::Frame::Impl>(sessionImpl) } {
         Views[0].DepthNearZ = sessionImpl.DepthNearZ;
@@ -1734,6 +1824,8 @@ namespace xr {
 #endif
         m_impl->sessionImpl.UpdateImageTrackingResults(UpdatedImageTrackingResults);
         m_impl->sessionImpl.UpdateFeaturePointCloud();
+        m_impl->sessionImpl.UpdateDepthSensing();
+        DepthSensingViews = m_impl->sessionImpl.DepthSensingFrameData;
     }
 
     System::Session::Frame::~Frame() {
@@ -1875,5 +1967,15 @@ namespace xr {
     void System::Session::CreateAugmentedImageDatabase(const std::vector<System::Session::ImageTrackingRequest>& requests) const
     {
         m_impl->CreateAugmentedImageDatabase(requests);
+    }
+
+    void System::Session::SetDepthSensingEnabled(bool enabled)
+    {
+        m_impl->DepthSensingEnabled = enabled;
+    }
+
+    bool System::Session::IsDepthSensingEnabled() const
+    {
+        return m_impl->DepthSensingEnabled;
     }
 }

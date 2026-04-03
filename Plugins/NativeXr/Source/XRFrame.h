@@ -1,5 +1,7 @@
 #pragma once
 
+#include "XRCPUDepthInformation.h"
+
 namespace Babylon
 {
     namespace Plugins
@@ -29,6 +31,11 @@ namespace Babylon
 
             Napi::Value GetJSSceneObjectFromID(const Napi::CallbackInfo& info, const xr::System::Session::Frame::SceneObject::Identifier objectID);
 
+            void SetDepthSensingEnabled(bool enabled)
+            {
+                m_depthSensingEnabled = enabled;
+            }
+
         private:
             std::shared_ptr<const xr::System::Session::Frame> m_frame{};
             Napi::ObjectReference m_jsXRViewerPose{};
@@ -47,6 +54,10 @@ namespace Babylon
             Napi::ObjectReference m_jsJointPose{};
 
             bool m_hasBegunTracking{ false };
+
+            // Depth sensing
+            bool m_depthSensingEnabled{false};
+            std::vector<Napi::ObjectReference> m_depthInfoObjects{};
 
             Napi::Value GetViewerPose(const Napi::CallbackInfo& info);
             Napi::Value GetPoseData(const Napi::CallbackInfo& info);
@@ -71,6 +82,7 @@ namespace Babylon
             void UpdatePlanes(const Napi::Env& env, uint32_t timestamp);
             void UpdateMeshes(const Napi::Env& env, uint32_t timestamp);
             void UpdateImageTrackingResults(const Napi::Env& env);
+            Napi::Value GetDepthInformation(const Napi::CallbackInfo& info);
         };
     } // Plugins
 } // Babylon

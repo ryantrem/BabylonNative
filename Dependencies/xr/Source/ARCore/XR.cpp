@@ -25,12 +25,6 @@
 
 #include <gsl/gsl>
 
-#define GLM_FORCE_RADIANS 1
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm.hpp>
-#include <gtc/matrix_transform.hpp>
-#include <gtc/type_ptr.hpp>
-#include <gtx/quaternion.hpp>
 #include <arcana/threading/task_schedulers.h>
 
 #include "Include/IXrContextARCore.h"
@@ -238,6 +232,8 @@ namespace xr
         float DepthFarZ{ DEFAULT_DEPTH_FAR_Z };
         bool PlaneDetectionEnabled{ false };
         bool FeaturePointCloudEnabled{ false };
+        bool DepthSensingEnabled{ false };
+        std::vector<Frame::DepthSensingData> DepthSensingFrameData;
 
         Impl(System::Impl& systemImpl, void* graphicsContext, std::function<void*()> windowProvider)
             : SystemImpl{ systemImpl }
@@ -676,33 +672,41 @@ namespace xr
                 return;
             }
 
-            // Push the camera orientation into a glm quaternion.
-            glm::quat cameraOrientationQuaternion
+            // Rotate a vector by a quaternion: v' = q * v * q_conjugate
+            // Using the optimized formula: v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
+            auto quatRotate = [](float qx, float qy, float qz, float qw, float vx, float vy, float vz, float out[3])
             {
-                ActiveFrameViews[0].Space.Pose.Orientation.W,
-                ActiveFrameViews[0].Space.Pose.Orientation.X,
-                ActiveFrameViews[0].Space.Pose.Orientation.Y,
-                ActiveFrameViews[0].Space.Pose.Orientation.Z
+                float cx = qy * vz - qz * vy + qw * vx;
+                float cy = qz * vx - qx * vz + qw * vy;
+                float cz = qx * vy - qy * vx + qw * vz;
+                out[0] = vx + 2.0f * (qy * cz - qz * cy);
+                out[1] = vy + 2.0f * (qz * cx - qx * cz);
+                out[2] = vz + 2.0f * (qx * cy - qy * cx);
             };
 
-            // Pull out the direction from the offset ray into a GLM Vector3.
-            glm::vec3 direction{ offsetRay.Direction.X, offsetRay.Direction.Y, offsetRay.Direction.Z };
+            float qx = ActiveFrameViews[0].Space.Pose.Orientation.X;
+            float qy = ActiveFrameViews[0].Space.Pose.Orientation.Y;
+            float qz = ActiveFrameViews[0].Space.Pose.Orientation.Z;
+            float qw = ActiveFrameViews[0].Space.Pose.Orientation.W;
 
-            // Multiply the camera rotation quaternion by the direction vector to calculate the direction vector in viewer space.
-            glm::vec3 cameraOrientedDirection{cameraOrientationQuaternion * glm::normalize(direction)};
-            float cameraOrientedDirectionArray[3]{ cameraOrientedDirection.x, cameraOrientedDirection.y, cameraOrientedDirection.z };
+            // Normalize the direction vector.
+            float dx = offsetRay.Direction.X, dy = offsetRay.Direction.Y, dz = offsetRay.Direction.Z;
+            float dirLen = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (dirLen > 0.0f) { dx /= dirLen; dy /= dirLen; dz /= dirLen; }
 
-            // Convert the origin to camera space by multiplying the origin by the rotation quaternion, then adding that to the
-            // position of the camera.
-            glm::vec3 offsetOrigin{ offsetRay.Origin.X, offsetRay.Origin.Y, offsetRay.Origin.Z };
-            offsetOrigin = cameraOrientationQuaternion * offsetOrigin;
+            // Rotate direction by camera quaternion.
+            float cameraOrientedDirectionArray[3];
+            quatRotate(qx, qy, qz, qw, dx, dy, dz, cameraOrientedDirectionArray);
 
-            // Pull out the origin composited from the offsetRay and camera position into a float array.
+            // Rotate origin by camera quaternion, then add camera position.
+            float rotatedOrigin[3];
+            quatRotate(qx, qy, qz, qw, offsetRay.Origin.X, offsetRay.Origin.Y, offsetRay.Origin.Z, rotatedOrigin);
+
             float hitTestOrigin[3]
             {
-                ActiveFrameViews[0].Space.Pose.Position.X + offsetOrigin.x,
-                ActiveFrameViews[0].Space.Pose.Position.Y + offsetOrigin.y,
-                ActiveFrameViews[0].Space.Pose.Position.Z + offsetOrigin.z
+                ActiveFrameViews[0].Space.Pose.Position.X + rotatedOrigin[0],
+                ActiveFrameViews[0].Space.Pose.Position.Y + rotatedOrigin[1],
+                ActiveFrameViews[0].Space.Pose.Position.Z + rotatedOrigin[2]
             };
 
             // Perform a hit test and process the results.
@@ -1214,6 +1218,82 @@ namespace xr
             ArPointCloud_release(pointCloud);
         }
 
+        void UpdateDepthSensing()
+        {
+            if (!DepthSensingEnabled)
+            {
+                DepthSensingFrameData.clear();
+                return;
+            }
+
+            DepthSensingFrameData.resize(ActiveFrameViews.size());
+
+            ArImage* depth_image = nullptr;
+            ArStatus status = ArFrame_acquireDepthImage16Bits(
+                xrContext->Session, xrContext->Frame, &depth_image);
+
+            if (status != AR_SUCCESS || depth_image == nullptr)
+            {
+                for (auto& d : DepthSensingFrameData)
+                {
+                    d.HasData = false;
+                }
+                return;
+            }
+
+            int32_t width{0}, height{0};
+            ArImage_getWidth(xrContext->Session, depth_image, &width);
+            ArImage_getHeight(xrContext->Session, depth_image, &height);
+
+            const uint8_t* buffer = nullptr;
+            int32_t buffer_length = 0;
+            ArImage_getPlaneData(xrContext->Session, depth_image, 0, &buffer, &buffer_length);
+
+            int32_t row_stride = 0;
+            ArImage_getPlaneRowStride(xrContext->Session, depth_image, 0, &row_stride);
+
+            auto& depthData = DepthSensingFrameData[0];
+            depthData.Width = static_cast<uint32_t>(width);
+            depthData.Height = static_cast<uint32_t>(height);
+            depthData.RawValueToMeters = 0.001f;
+            depthData.HasData = true;
+            depthData.DepthBuffer.resize(static_cast<size_t>(width) * height);
+
+            for (int32_t r = 0; r < height; r++)
+            {
+                const uint16_t* row_ptr = reinterpret_cast<const uint16_t*>(buffer + r * row_stride);
+                std::copy(row_ptr, row_ptr + width, depthData.DepthBuffer.data() + r * width);
+            }
+
+            float src[] = {0, 0, 1, 0, 0, 1};
+            float dst[6];
+            ArFrame_transformCoordinates2d(
+                xrContext->Session, xrContext->Frame,
+                AR_COORDINATES_2D_VIEW_NORMALIZED, 3, src,
+                AR_COORDINATES_2D_TEXTURE_NORMALIZED, dst);
+
+            float ax = dst[0], ay = dst[1];
+            float bx = dst[2], by = dst[3];
+            float cx = dst[4], cy = dst[5];
+
+            float a = bx - ax, b = cx - ax, tx = ax;
+            float c = by - ay, d = cy - ay, ty = ay;
+
+            depthData.NormDepthBufferFromNormView = {
+                a,  c,  0, 0,
+                b,  d,  0, 0,
+                0,  0,  1, 0,
+                tx, ty, 0, 1
+            };
+
+            ArImage_release(depth_image);
+
+            for (size_t i = 1; i < DepthSensingFrameData.size(); i++)
+            {
+                DepthSensingFrameData[i].HasData = false;
+            }
+        }
+
         Frame::Plane& GetPlaneByID(Frame::Plane::Identifier planeID)
         {
             const auto end{Planes.end()};
@@ -1414,6 +1494,7 @@ namespace xr
         , UpdatedMeshes{}
         , RemovedMeshes{}
         , UpdatedImageTrackingResults{}
+        , DepthSensingViews{}
         , IsTracking{sessionImpl.IsTracking()}
         , m_impl{ std::make_unique<Session::Frame::Impl>(sessionImpl) }
     {
@@ -1422,6 +1503,8 @@ namespace xr
             m_impl->sessionImpl.UpdatePlanes(UpdatedPlanes, RemovedPlanes);
             m_impl->sessionImpl.UpdateFeaturePointCloud();
             m_impl->sessionImpl.UpdateImageTrackingResults(UpdatedImageTrackingResults);
+            m_impl->sessionImpl.UpdateDepthSensing();
+            DepthSensingViews = m_impl->sessionImpl.DepthSensingFrameData;
         }
     }
 
@@ -1629,5 +1712,15 @@ namespace xr
     void System::Session::CreateAugmentedImageDatabase(const std::vector<System::Session::ImageTrackingRequest>& bitmaps) const
     {
         return m_impl->CreateAugmentedImageDatabase(bitmaps);
+    }
+
+    void System::Session::SetDepthSensingEnabled(bool enabled)
+    {
+        m_impl->DepthSensingEnabled = enabled;
+    }
+
+    bool System::Session::IsDepthSensingEnabled() const
+    {
+        return m_impl->DepthSensingEnabled;
     }
 }

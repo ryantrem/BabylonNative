@@ -54,10 +54,7 @@ if (ANDROID)
                           ${ARCORE_LIBPATH}/${ANDROID_ABI}/libarcore_sdk_c.so
                           INTERFACE_INCLUDE_DIRECTORIES ${arcore-android-sdk_SOURCE_DIR}/libraries/include)
 
-    add_library(glm INTERFACE)
-    set_target_properties(glm PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${arcore-android-sdk_SOURCE_DIR}/libraries/glm)
-
-    target_link_libraries(xr PRIVATE glm arcore AndroidExtensions)
+    target_link_libraries(xr PRIVATE arcore AndroidExtensions)
 elseif (IOS)    
     target_link_libraries(xr PRIVATE "-framework ARKit")
 endif()

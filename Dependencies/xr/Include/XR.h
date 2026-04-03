@@ -333,7 +333,22 @@ namespace xr
                 private:
                     static inline Identifier NEXT_ID{ 0 };
                 };
-                
+
+                struct DepthSensingData
+                {
+                    uint32_t Width{0};
+                    uint32_t Height{0};
+                    std::vector<uint16_t> DepthBuffer{};
+                    float RawValueToMeters{0.001f};
+                    std::array<float, 16> NormDepthBufferFromNormView{
+                        1, 0, 0, 0,
+                        0, 1, 0, 0,
+                        0, 0, 1, 0,
+                        0, 0, 0, 1
+                    };
+                    bool HasData{false};
+                };
+
                 std::vector<View>& Views;
                 std::vector<InputSource>& InputSources;
                 std::vector<FeaturePoint>& FeaturePointCloud;
@@ -347,6 +362,8 @@ namespace xr
                 std::vector<Mesh::Identifier> UpdatedMeshes;
                 std::vector<Mesh::Identifier> RemovedMeshes;
                 std::vector<ImageTrackingResult::Identifier> UpdatedImageTrackingResults;
+
+                std::vector<DepthSensingData> DepthSensingViews;
 
                 bool IsTracking;
 
@@ -387,6 +404,9 @@ namespace xr
 
             std::vector<ImageTrackingScore>* GetImageTrackingScores() const;
             void CreateAugmentedImageDatabase(const std::vector<ImageTrackingRequest>&) const;
+
+            void SetDepthSensingEnabled(bool enabled);
+            bool IsDepthSensingEnabled() const;
         private:
             std::unique_ptr<Impl> m_impl{};
         };

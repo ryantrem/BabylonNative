@@ -44,6 +44,7 @@ namespace Babylon
                     InstanceMethod("fillPoses", &XRFrame::FillPoses),
                     InstanceMethod("fillJointRadii", &XRFrame::FillJointRadii),
                     InstanceMethod("getImageTrackingResults", &XRFrame::GetImageTrackingResults),
+                    InstanceMethod("getDepthInformation", &XRFrame::GetDepthInformation),
                     InstanceAccessor("trackedAnchors", &XRFrame::GetTrackedAnchors, nullptr),
                     InstanceAccessor("worldInformation", &XRFrame::GetWorldInformation, nullptr),
                     InstanceAccessor("featurePointCloud", &XRFrame::GetFeaturePointCloud, nullptr),
@@ -501,6 +502,39 @@ namespace Babylon
                     napiResult.Set("measuredWidthInMeters", Napi::Value::From(env, nativeResult.MeasuredWidthInMeters));
                 }
             }
+        }
+
+        Napi::Value XRFrame::GetDepthInformation(const Napi::CallbackInfo& info)
+        {
+            if (!m_depthSensingEnabled || !m_frame || m_frame->DepthSensingViews.empty())
+            {
+                return info.Env().Null();
+            }
+
+            auto* xrView = XRView::Unwrap(info[0].As<Napi::Object>());
+            size_t viewIdx = xrView->EyeIndex();
+
+            if (viewIdx >= m_frame->DepthSensingViews.size())
+            {
+                return info.Env().Null();
+            }
+
+            const auto& depthData = m_frame->DepthSensingViews[viewIdx];
+            if (!depthData.HasData)
+            {
+                return info.Env().Null();
+            }
+
+            // Ensure we have a cached depth info object for this view index.
+            while (m_depthInfoObjects.size() <= viewIdx)
+            {
+                m_depthInfoObjects.push_back(Napi::Persistent(XRCPUDepthInformation::New(info.Env())));
+            }
+
+            auto* depthInfo = XRCPUDepthInformation::Unwrap(m_depthInfoObjects[viewIdx].Value());
+            depthInfo->Update(depthData);
+
+            return m_depthInfoObjects[viewIdx].Value();
         }
     } // Plugins
 } // Babylon

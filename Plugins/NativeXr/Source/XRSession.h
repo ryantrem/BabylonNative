@@ -53,6 +53,11 @@ namespace Babylon
 
             std::vector<xr::System::Session::ImageTrackingRequest> m_imageTrackingRequests{};
 
+            // Depth sensing
+            bool m_depthSensingEnabled{false};
+            std::string m_depthUsage{};
+            std::string m_depthDataFormat{};
+
             Napi::Value GetInputSources(const Napi::CallbackInfo& /*info*/)
             {
                 return m_jsInputSources.Value();
@@ -108,6 +113,8 @@ namespace Babylon
             Napi::Value TrySetMeshDetectorEnabled(const Napi::CallbackInfo& info);
             Napi::Value TrySetPreferredMeshDetectorOptions(const Napi::CallbackInfo& info);
             Napi::Value GetTrackedImageScores(const Napi::CallbackInfo& info);
+            Napi::Value GetDepthUsage(const Napi::CallbackInfo& info);
+            Napi::Value GetDepthDataFormat(const Napi::CallbackInfo& info);
         };
     } // Plugins
 } // Babylon
