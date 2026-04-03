@@ -303,9 +303,9 @@ namespace Babylon
                     for (uint32_t i = 0; i < formats.Length(); i++)
                     {
                         auto fmt = formats.Get(i).As<Napi::String>().Utf8Value();
-                        if (fmt == "luminance-alpha")
+                        if (fmt == "luminance-alpha" || fmt == "unsigned-short")
                         {
-                            session.m_depthDataFormat = "luminance-alpha";
+                            session.m_depthDataFormat = fmt;
                             break;
                         }
                     }
