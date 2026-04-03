@@ -235,6 +235,20 @@ namespace xr
         bool DepthSensingEnabled{ false };
         std::vector<Frame::DepthSensingData> DepthSensingFrameData;
 
+        void SetDepthSensingEnabled(bool enabled)
+        {
+            DepthSensingEnabled = enabled;
+            if (enabled && xrContext->Initialized)
+            {
+                ArConfig* arConfig{};
+                ArConfig_create(xrContext->Session, &arConfig);
+                ArSession_getConfig(xrContext->Session, arConfig);
+                ArConfig_setDepthMode(xrContext->Session, arConfig, AR_DEPTH_MODE_AUTOMATIC);
+                ArSession_configure(xrContext->Session, arConfig);
+                ArConfig_destroy(arConfig);
+            }
+        }
+
         Impl(System::Impl& systemImpl, void* graphicsContext, std::function<void*()> windowProvider)
             : SystemImpl{ systemImpl }
             , xrContext{systemImpl.XrContext}
@@ -1716,7 +1730,7 @@ namespace xr
 
     void System::Session::SetDepthSensingEnabled(bool enabled)
     {
-        m_impl->DepthSensingEnabled = enabled;
+        m_impl->SetDepthSensingEnabled(enabled);
     }
 
     bool System::Session::IsDepthSensingEnabled() const
