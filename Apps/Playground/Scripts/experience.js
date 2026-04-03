@@ -13,6 +13,7 @@ const ar = false;
 const xrHitTest = false;
 const xrFeaturePoints = false;
 const meshDetection = false;
+const depthSensing = true;
 const text = false;
 const hololens = false;
 const cameraTexture = false;
@@ -352,6 +353,23 @@ CreateBoxAsync(scene).then(function () {
                         if (++featurePointChangeCounter % 60 == 0) {
                             pcs.setParticles();
                         }
+                    });
+                }
+
+                if (depthSensing) {
+                    const depthSensingFeature = xr.baseExperience.featuresManager.enableFeature(
+                        BABYLON.WebXRFeatureName.DEPTH_SENSING,
+                        "latest",
+                        {
+                            usagePreference: ["cpu"],
+                            dataFormatPreference: ["ushort"],
+                        },
+                    );
+
+                    depthSensingFeature.onGetDepthInMetersAvailable.add((getDepthInMeters) => {
+                        const centerDepth = getDepthInMeters(0.5, 0.5);
+                        console.log("Depth at center: " + centerDepth.toFixed(3) + "m"
+                            + " (" + depthSensingFeature.width + "x" + depthSensingFeature.height + ")");
                     });
                 }
 
