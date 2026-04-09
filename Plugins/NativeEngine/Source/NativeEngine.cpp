@@ -252,6 +252,7 @@ namespace Babylon
         {
             assert(
                 image->m_format == bimg::TextureFormat::R16 ||
+                image->m_format == bimg::TextureFormat::R32F ||
                 image->m_format == bimg::TextureFormat::RGB8 ||
                 image->m_format == bimg::TextureFormat::RGBA8 ||
                 image->m_format == bimg::TextureFormat::RGBA16 ||
