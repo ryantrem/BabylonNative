@@ -238,15 +238,6 @@ namespace xr
         void SetDepthSensingEnabled(bool enabled)
         {
             DepthSensingEnabled = enabled;
-            if (enabled && xrContext->Initialized)
-            {
-                ArConfig* arConfig{};
-                ArConfig_create(xrContext->Session, &arConfig);
-                ArSession_getConfig(xrContext->Session, arConfig);
-                ArConfig_setDepthMode(xrContext->Session, arConfig, AR_DEPTH_MODE_AUTOMATIC);
-                ArSession_configure(xrContext->Session, arConfig);
-                ArConfig_destroy(arConfig);
-            }
         }
 
         Impl(System::Impl& systemImpl, void* graphicsContext, std::function<void*()> windowProvider)
@@ -378,6 +369,10 @@ namespace xr
 
                 // Set Focus Mode Auto
                 ArConfig_setFocusMode(xrContext->Session, arConfig, AR_FOCUS_MODE_AUTO);
+
+                // Enable depth mode so depth images are available when requested.
+                // The actual acquisition is gated by DepthSensingEnabled at runtime.
+                ArConfig_setDepthMode(xrContext->Session, arConfig, AR_DEPTH_MODE_AUTOMATIC);
 
                 // Configure the ArSession
                 ArStatus statusConfig { ArSession_configure(xrContext->Session, arConfig) };
