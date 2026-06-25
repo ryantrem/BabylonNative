@@ -1,0 +1,16 @@
+{
+  "name": "babylon-native-lite-bundler",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bundles Babylon Lite scenes for Babylon Native Lite by externalizing the 'babylon-lite' import to the native BabylonNativeLite global.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0"
+  },
+  "dependencies": {
+    "@babylonjs/lite": "1.3.0"
+  }
+}

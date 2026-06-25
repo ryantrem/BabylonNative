@@ -1,0 +1,8 @@
+# Build output for the standalone Lite milestone build.
+build/
+
+# Transient build logs
+*.log
+
+# Local capture artifacts
+*.png
