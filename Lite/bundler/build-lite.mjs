@@ -56,11 +56,12 @@ const rawImport = {
     },
 };
 
-// Legacy ChakraCore can't parse BigInt literals (`32n`), and esbuild can't lower them.
-// Lite uses two in OpenType font-parser code (unused by non-text scenes, but still
-// parsed). Rewrite integer BigInt literals to `BigInt(n)` calls (handled by the
-// host-prelude BigInt passthrough shim) so the bundle parses. Scoped to Lite .js files.
-const liteFileFilter = /[\\/](babylon-lite|@babylonjs[\\/]lite)[\\/].*\.js$/;
+// Legacy ChakraCore can't parse BigInt literals (`32n`), and esbuild can't lower them to
+// es2017. Rewrite integer BigInt literals to `BigInt(n)` calls (handled by the host-prelude
+// BigInt passthrough shim) so the bundle parses. Applied to every bundled .js/.mjs file
+// (some Lite dist chunks live outside the babylon-lite path filter), not the .ts scene
+// sources (esbuild's TS loader handles those and they don't use BigInt literals).
+const liteFileFilter = /\.(js|mjs)$/;
 const lowerBigIntLiterals = {
     name: "lower-bigint-literals",
     setup(b) {
