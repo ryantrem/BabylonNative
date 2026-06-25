@@ -24,7 +24,17 @@ const realLiteEntry = process.env.LITE_DIST
 
 // Pure-JS shims for web globals legacy ChakraCore lacks (TextEncoder/Decoder, etc.),
 // prepended to every bundle as a banner.
-const hostPrelude = readFileSync(join(here, "runtime", "host-prelude.js"), "utf8");
+const hostPreludeBody = readFileSync(join(here, "runtime", "host-prelude.js"), "utf8");
+
+// Public asset root for resolving root-relative URLs ("/brdf-lut.png", "/textures/...").
+// On the web these are served from lab/public; in the native host (no origin) the prelude's
+// fetch wrapper rewrites them to file:// URLs under this root. Overridable via LITE_PUBLIC_ROOT.
+const publicRootDir = process.env.LITE_PUBLIC_ROOT
+    ? process.env.LITE_PUBLIC_ROOT
+    : "D:\\Repos\\Babylon-Lite-3\\lab\\public";
+const publicRootUrl = "file:///" + publicRootDir.replace(/\\/g, "/").replace(/^\/+/, "");
+const hostPrelude =
+    `globalThis.__LITE_PUBLIC_ROOT = ${JSON.stringify(publicRootUrl)};\n` + hostPreludeBody;
 
 // Legacy ChakraCore can't parse BigInt literals (`32n`), and esbuild can't lower them.
 // Lite uses two in OpenType font-parser code (unused by non-text scenes, but still
@@ -44,11 +54,34 @@ const lowerBigIntLiterals = {
     },
 };
 
-const entries = existsSync(scenesDir)
-    ? readdirSync(scenesDir).filter((f) => f.endsWith(".ts") || f.endsWith(".js"))
-    : [];
+// Scene source selection:
+//  - Default: build the hand-authored scenes in ./scenes-lite (box, multi, pbr, ...).
+//  - LITE_CANON=scene2[,scene3,...]: build the CANONICAL Babylon Lite scene corpus from
+//    lab/lite/src/lite/<name>.ts in the Babylon-Lite-3 repo (overridable via LITE_CANON_DIR).
+//    These are the upstream reference scenes (scene1..sceneN) run unmodified over our host.
+const canonDir = process.env.LITE_CANON_DIR
+    ? process.env.LITE_CANON_DIR
+    : "D:\\Repos\\Babylon-Lite-3\\lab\\lite\\src\\lite";
+const canonSel = (process.env.LITE_CANON || "").trim();
+
+let srcDir;
+let entries;
+if (canonSel) {
+    srcDir = canonDir;
+    if (canonSel.toLowerCase() === "all") {
+        entries = readdirSync(canonDir).filter((f) => /^scene\d+\.ts$/.test(f));
+    } else {
+        entries = canonSel.split(",").map((s) => s.trim()).filter(Boolean)
+            .map((s) => (s.endsWith(".ts") ? s : `${s}.ts`));
+    }
+} else {
+    srcDir = scenesDir;
+    entries = existsSync(scenesDir)
+        ? readdirSync(scenesDir).filter((f) => f.endsWith(".ts") || f.endsWith(".js"))
+        : [];
+}
 if (entries.length === 0) {
-    console.error("No scenes in", scenesDir);
+    console.error("No scenes selected in", srcDir);
     process.exit(1);
 }
 
@@ -71,7 +104,7 @@ for (const entry of entries) {
     const name = entry.replace(/\.(ts|js)$/, "");
     const outfile = join(outDir, `${name}${outSuffix}`);
     await build({
-        entryPoints: [join(scenesDir, entry)],
+        entryPoints: [join(srcDir, entry)],
         bundle: true,
         format: "iife",
         target: "es2017", // legacy ChakraCore: lower optional-chaining/nullish-coalescing/etc.

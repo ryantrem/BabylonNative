@@ -2235,6 +2235,38 @@ namespace lite::webgpu
         canvas.Set("setAttribute", Napi::Function::New(env,
             [](const Napi::CallbackInfo& info) -> Napi::Value { return info.Env().Undefined(); },
             "setAttribute"));
+        // Pointer/keyboard input is intentionally unsupported in the native host (no DOM
+        // event loop). Provide no-op addEventListener/removeEventListener so scene code that
+        // calls attachControl(camera, canvas, scene) runs unmodified — it just receives no
+        // input events. (Skipping interactive camera control is fine for the benchmark/render
+        // corpus.)
+        canvas.Set("addEventListener", Napi::Function::New(env,
+            [](const Napi::CallbackInfo& info) -> Napi::Value { return info.Env().Undefined(); },
+            "addEventListener"));
+        canvas.Set("removeEventListener", Napi::Function::New(env,
+            [](const Napi::CallbackInfo& info) -> Napi::Value { return info.Env().Undefined(); },
+            "removeEventListener"));
+        // getBoundingClientRect — some control/setup paths read canvas rect. Report the
+        // backing-store size at origin.
+        canvas.Set("getBoundingClientRect", Napi::Function::New(env,
+            [width, height](const Napi::CallbackInfo& info) -> Napi::Value {
+                Napi::Env env = info.Env();
+                Napi::Object r = Napi::Object::New(env);
+                r.Set("x", Napi::Number::New(env, 0));
+                r.Set("y", Napi::Number::New(env, 0));
+                r.Set("left", Napi::Number::New(env, 0));
+                r.Set("top", Napi::Number::New(env, 0));
+                r.Set("right", Napi::Number::New(env, width));
+                r.Set("bottom", Napi::Number::New(env, height));
+                r.Set("width", Napi::Number::New(env, width));
+                r.Set("height", Napi::Number::New(env, height));
+                return r;
+            },
+            "getBoundingClientRect"));
+        // dataset / style — plain bags so scene code that stashes diagnostics on the canvas
+        // (e.g. canvas.dataset.drawCalls = ..., canvas.style.cursor = ...) doesn't throw.
+        canvas.Set("dataset", Napi::Object::New(env));
+        canvas.Set("style", Napi::Object::New(env));
         return canvas;
     }
 

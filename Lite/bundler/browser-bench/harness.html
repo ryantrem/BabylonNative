@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Babylon Lite — Browser Bench</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { width: 100%; height: 100%; display: block; }
+    #bench { position: fixed; top: 4px; left: 4px; font: 12px monospace; color: #0f0; white-space: pre; z-index: 10; }
+  </style>
+  <!-- Instrument BEFORE the scene module runs (classic script executes before deferred
+       module scripts). Wrap requestAnimationFrame so each real-Lite renderFrame callback
+       is timed with performance.now() (present-excluded) — the same metric the native host
+       reports. Collect samples, drop warm-up, compute min/avg/p95, expose on window. -->
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const WARMUP = parseInt(params.get("warmup") || "30", 10);
+      const COUNT = parseInt(params.get("frames") || "200", 10);
+      const samples = [];
+      window.__bench = { done: false, samples };
+      const rafOrig = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = function (cb) {
+        return rafOrig(function (t) {
+          const s = performance.now();
+          cb(t);
+          const e = performance.now();
+          samples.push(e - s);
+          if (samples.length === WARMUP + COUNT && !window.__bench.done) finish();
+        });
+      };
+      function finish() {
+        const arr = samples.slice(WARMUP).sort((a, b) => a - b);
+        const sum = arr.reduce((a, b) => a + b, 0);
+        const avg = sum / arr.length;
+        const min = arr[0];
+        const p95 = arr[Math.floor(arr.length * 0.95)];
+        const max = arr[arr.length - 1];
+        const res = { scene: params.get("scene"), n: arr.length,
+          cpu_min_ms: +min.toFixed(4), cpu_avg_ms: +avg.toFixed(4),
+          cpu_p95_ms: +p95.toFixed(4), cpu_max_ms: +max.toFixed(4) };
+        window.__bench.done = true;
+        window.__bench.result = res;
+        const line = `BENCH-BROWSER scene=${res.scene} frames=${res.n} ` +
+          `cpu_avg_ms=${res.cpu_avg_ms} cpu_min_ms=${res.cpu_min_ms} ` +
+          `cpu_p95_ms=${res.cpu_p95_ms} cpu_max_ms=${res.cpu_max_ms}`;
+        window.__bench.line = line;
+        document.getElementById("bench").textContent = line.replace(/ /g, "\n");
+        console.log(line);
+      }
+    })();
+  </script>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <div id="bench">loading…</div>
+  <script>
+    // Dynamically import the selected scene module (?scene=scene2).
+    const scene = new URLSearchParams(location.search).get("scene") || "scene2";
+    import(`./dist/${scene}.js`).catch((e) => {
+      document.getElementById("bench").textContent = "scene error: " + (e && e.stack ? e.stack : e);
+      console.error(e);
+    });
+  </script>
+</body>
+</html>

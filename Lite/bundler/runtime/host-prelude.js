@@ -112,4 +112,21 @@
             },
         });
     }
+    // ---- fetch: resolve root-relative URLs ----
+    // The native host has no document origin, so a scene that fetches a root-relative asset
+    // (e.g. "/brdf-lut.png", "/textures/foo.env" — served from lab/public on the web) would
+    // hand WinHTTP a hostless URL and stall. Rewrite leading-"/" URLs to a file:// URL under
+    // a configured public root (globalThis.__LITE_PUBLIC_ROOT, injected by the bundler). This
+    // lets the upstream scene corpus run unmodified. Absolute (http/https/file) URLs pass through.
+    if (typeof g.fetch === "function" && !g.__fetchRootPatched) {
+        const root = g.__LITE_PUBLIC_ROOT;
+        const origFetch = g.fetch.bind(g);
+        g.fetch = function (url, opts) {
+            if (typeof url === "string" && url.charAt(0) === "/" && root) {
+                url = root.replace(/\/+$/, "") + url;
+            }
+            return origFetch(url, opts);
+        };
+        g.__fetchRootPatched = true;
+    }
 })(typeof globalThis !== "undefined" ? globalThis : this);
