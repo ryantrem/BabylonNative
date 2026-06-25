@@ -172,6 +172,16 @@ namespace lite::webgpu
         };
         MemProfiler g_mem;
 
+        // Threaded-submit default: ON unless LITE_THREAD_SUBMIT is explicitly set to a
+        // false-y value (0/f/F/n/N). Reads the env once. Keeping it a single helper means
+        // the device-toggle path and the Module flag agree.
+        bool ThreadedSubmitDefault()
+        {
+            const char* v = std::getenv("LITE_THREAD_SUBMIT");
+            if (v == nullptr || v[0] == '\0') return true; // default ON
+            return !(v[0] == '0' || v[0] == 'f' || v[0] == 'F' || v[0] == 'n' || v[0] == 'N');
+        }
+
         // Decoded RGBA8 image moved from createImageBitmap into an ImageBitmap wrapper via
         // an N-API External (avoids copying the pixel buffer across the boundary).
         struct DecodedImage
@@ -2010,8 +2020,10 @@ namespace lite::webgpu
         }
         static const char* kEnableDxc = "use_dxc";
         static const char* kImplicitSync = "implicit_device_synchronization";
-        const char* tsv = std::getenv("LITE_THREAD_SUBMIT");
-        bool threaded = tsv != nullptr && (tsv[0] == '1' || tsv[0] == 't' || tsv[0] == 'T');
+        // Threaded submit is ON by default (it moves the expensive Dawn->D3D12 command
+        // translation off the JS thread; measured a consistent CPU win across light and
+        // draw-heavy scenes with correctness preserved). Opt out with LITE_THREAD_SUBMIT=0.
+        bool threaded = ThreadedSubmitDefault();
         const char* enabledToggles[2] = { kEnableDxc, kImplicitSync };
         wgpu::DawnTogglesDescriptor toggles{};
         toggles.enabledToggleCount = threaded ? 2 : 1; // add device thread-safety only when needed
@@ -2130,8 +2142,7 @@ namespace lite::webgpu
         // onto a dedicated render thread (mirrors the browser's GPU-process split). The render
         // thread is started lazily on the first submit so the device exists.
         {
-            const char* v = std::getenv("LITE_THREAD_SUBMIT");
-            m_threadedSubmit = v != nullptr && (v[0] == '1' || v[0] == 't' || v[0] == 'T');
+            m_threadedSubmit = ThreadedSubmitDefault();
             if (const char* af = std::getenv("LITE_THREAD_ARM_FRAME"))
             {
                 int n = std::atoi(af);
