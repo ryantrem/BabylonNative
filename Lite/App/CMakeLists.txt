@@ -9,7 +9,8 @@ target_link_libraries(LiteApp PRIVATE
     LiteNativeLite
     Console
     Fetch
-    Blob)
+    Blob
+    URL)
 
 target_compile_definitions(LiteApp PRIVATE
     UNICODE

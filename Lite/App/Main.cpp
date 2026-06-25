@@ -23,6 +23,7 @@
 #include <Babylon/Polyfills/Console.h>
 #include <Babylon/Polyfills/Fetch.h>
 #include <Babylon/Polyfills/Blob.h>
+#include <Babylon/Polyfills/URL.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -132,6 +133,11 @@ int main()
         // bytes in a Blob then passes it to createImageBitmap (installed by the WebGPU
         // polyfill). Setup-only.
         Babylon::Polyfills::Blob::Initialize(env);
+
+        // URL / URLSearchParams — scene code resolves multi-file glTF asset paths
+        // (new URL(relative, base)) and reads query params (new URLSearchParams(
+        // window.location.search)). JsRuntimeHost ships a native polyfill (deps: JsRuntime).
+        Babylon::Polyfills::URL::Initialize(env);
         auto ctrl = lite::nativelite::Initialize(env, runtime, renderer, windowHandle,
             static_cast<uint32_t>(fbWidth), static_cast<uint32_t>(fbHeight));
 

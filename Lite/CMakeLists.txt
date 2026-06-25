@@ -103,7 +103,7 @@ set(JSRUNTIMEHOST_POLYFILL_XMLHTTPREQUEST OFF CACHE BOOL "" FORCE)
 # Fetch: ON — provides globalThis.fetch for real Lite's glTF/env asset loading.
 set(JSRUNTIMEHOST_POLYFILL_FETCH ON CACHE BOOL "" FORCE)
 set(JSRUNTIMEHOST_POLYFILL_WEBSOCKET OFF CACHE BOOL "" FORCE)
-set(JSRUNTIMEHOST_POLYFILL_URL OFF CACHE BOOL "" FORCE)
+set(JSRUNTIMEHOST_POLYFILL_URL ON CACHE BOOL "" FORCE)
 set(JSRUNTIMEHOST_POLYFILL_ABORT_CONTROLLER OFF CACHE BOOL "" FORCE)
 # Blob: ON — real Lite's glTF loader wraps decoded image bytes in a Blob before handing
 # them to createImageBitmap. JsRuntimeHost ships a native Blob polyfill (no extra deps).

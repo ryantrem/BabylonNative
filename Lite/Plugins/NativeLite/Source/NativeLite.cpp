@@ -1007,7 +1007,68 @@ namespace lite::nativelite
                     return info.Env().Global().Get("canvas");
                 },
                 "getElementById"));
+            // document.createElement(tag): "canvas" returns the host canvas; any other tag
+            // returns a no-op element (setAttribute/addEventListener/appendChild/style/
+            // textContent) so scene code that builds UI (buttons, overlays) runs unmodified
+            // without a DOM. No actual UI is shown (pointer input is unsupported).
+            document.Set("createElement", Napi::Function::New(env,
+                [](const Napi::CallbackInfo& info) -> Napi::Value {
+                    Napi::Env env = info.Env();
+                    std::string tag = info.Length() >= 1 && info[0].IsString()
+                        ? info[0].As<Napi::String>().Utf8Value() : "";
+                    if (tag == "canvas")
+                        return env.Global().Get("canvas");
+                    Napi::Object el = Napi::Object::New(env);
+                    auto noop = Napi::Function::New(env,
+                        [](const Napi::CallbackInfo& i) -> Napi::Value { return i.Env().Undefined(); });
+                    el.Set("setAttribute", noop);
+                    el.Set("appendChild", noop);
+                    el.Set("removeChild", noop);
+                    el.Set("addEventListener", noop);
+                    el.Set("removeEventListener", noop);
+                    el.Set("style", Napi::Object::New(env));
+                    el.Set("dataset", Napi::Object::New(env));
+                    return el;
+                },
+                "createElement"));
+            // document.body — a no-op container for appendChild(button)/etc.
+            {
+                Napi::Object body = Napi::Object::New(env);
+                auto noop = Napi::Function::New(env,
+                    [](const Napi::CallbackInfo& i) -> Napi::Value { return i.Env().Undefined(); });
+                body.Set("appendChild", noop);
+                body.Set("removeChild", noop);
+                body.Set("setAttribute", noop);
+                document.Set("body", body);
+            }
             env.Global().Set("document", document);
+
+            // window — minimal browser global. location.search drives URLSearchParams-based
+            // scene options; setTimeout/requestAnimationFrame forward to the globals the host
+            // already installs. No real DOM/event loop beyond the native rAF pump.
+            {
+                Napi::Value winVal = env.Global().Get("window");
+                Napi::Object window = winVal.IsObject() ? winVal.As<Napi::Object>() : Napi::Object::New(env);
+                Napi::Object location = Napi::Object::New(env);
+                location.Set("search", Napi::String::New(env, ""));
+                location.Set("href", Napi::String::New(env, "app:///"));
+                location.Set("origin", Napi::String::New(env, "app://"));
+                location.Set("protocol", Napi::String::New(env, "app:"));
+                window.Set("location", location);
+                window.Set("devicePixelRatio", Napi::Number::New(env, 1.0));
+                auto noop = Napi::Function::New(env,
+                    [](const Napi::CallbackInfo& i) -> Napi::Value { return i.Env().Undefined(); });
+                window.Set("addEventListener", noop);
+                window.Set("removeEventListener", noop);
+                // Forward timer/raf accessors to the real globals if present.
+                for (const char* fn : {"setTimeout", "clearTimeout", "setInterval", "clearInterval",
+                                       "requestAnimationFrame", "cancelAnimationFrame"})
+                {
+                    Napi::Value g = env.Global().Get(fn);
+                    if (g.IsFunction()) window.Set(fn, g);
+                }
+                env.Global().Set("window", window);
+            }
         }
 
         // requestAnimationFrame — native pump for the IN-APP JS render loop (benchmark
