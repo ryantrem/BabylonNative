@@ -8,7 +8,7 @@
 //   (or set LITE_CANON=scene2). Output: browser-bench/dist/<scene>.js
 
 import { build } from "esbuild";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -38,6 +38,21 @@ const aliasLite = {
     },
 };
 
+// Vite-style `?raw` imports (WGSL shader sources imported as strings).
+const rawImport = {
+    name: "raw-import",
+    setup(b) {
+        b.onResolve({ filter: /\?raw$/ }, (args) => {
+            const clean = args.path.replace(/\?raw$/, "");
+            const abs = clean.startsWith(".") ? join(args.resolveDir, clean) : clean;
+            return { path: abs, namespace: "raw-file" };
+        });
+        b.onLoad({ filter: /.*/, namespace: "raw-file" }, (args) => {
+            return { contents: readFileSync(args.path, "utf8"), loader: "text" };
+        });
+    },
+};
+
 for (const entry of entries) {
     const name = entry.replace(/\.ts$/, "");
     const outfile = join(outDir, `${name}.js`);
@@ -50,7 +65,7 @@ for (const entry of entries) {
         outfile,
         legalComments: "none",
         logLevel: "warning",
-        plugins: [aliasLite],
+        plugins: [aliasLite, rawImport],
     });
     console.log(`browser-bundled ${entry} -> dist/${name}.js`);
 }

@@ -36,6 +36,26 @@ const publicRootUrl = "file:///" + publicRootDir.replace(/\\/g, "/").replace(/^\
 const hostPrelude =
     `globalThis.__LITE_PUBLIC_ROOT = ${JSON.stringify(publicRootUrl)};\n` + hostPreludeBody;
 
+// Vite-style `?raw` imports: Lite imports its WGSL shader sources as raw strings
+// (e.g. `import src from "./skybox.wgsl?raw"`). esbuild doesn't understand the `?raw`
+// suffix, so resolve it to the real file and load the contents via the `text` loader
+// (which produces `export default "<file contents>"`).
+const rawImport = {
+    name: "raw-import",
+    setup(b) {
+        b.onResolve({ filter: /\?raw$/ }, (args) => {
+            const clean = args.path.replace(/\?raw$/, "");
+            const abs = clean.startsWith(".")
+                ? join(args.resolveDir, clean)
+                : clean;
+            return { path: abs, namespace: "raw-file" };
+        });
+        b.onLoad({ filter: /.*/, namespace: "raw-file" }, (args) => {
+            return { contents: readFileSync(args.path, "utf8"), loader: "text" };
+        });
+    },
+};
+
 // Legacy ChakraCore can't parse BigInt literals (`32n`), and esbuild can't lower them.
 // Lite uses two in OpenType font-parser code (unused by non-text scenes, but still
 // parsed). Rewrite integer BigInt literals to `BigInt(n)` calls (handled by the
@@ -98,24 +118,34 @@ const aliasLiteOnly = {
         b.onResolve({ filter: /^(babylon-lite|@babylonjs\/lite)$/ }, () => ({ path: realLiteEntry }));
     },
 };
-const activePlugins = [aliasLiteOnly, lowerBigIntLiterals];
+const activePlugins = [aliasLiteOnly, rawImport, lowerBigIntLiterals];
 
+let __built = 0, __failed = 0;
 for (const entry of entries) {
     const name = entry.replace(/\.(ts|js)$/, "");
     const outfile = join(outDir, `${name}${outSuffix}`);
-    await build({
-        entryPoints: [join(srcDir, entry)],
-        bundle: true,
-        format: "iife",
-        target: "es2017", // legacy ChakraCore: lower optional-chaining/nullish-coalescing/etc.
-        platform: "neutral",
-        outfile,
-        legalComments: "none",
-        logLevel: "info",
-        banner: { js: hostPrelude },
-        plugins: activePlugins,
-        // The published package resolves "@babylonjs/lite" from node_modules. Dynamic
-        // imports inside it are inlined into the single IIFE by esbuild.
-    });
-    console.log(`bundled ${entry} -> dist/${name}${outSuffix}`);
+    try {
+        await build({
+            entryPoints: [join(srcDir, entry)],
+            bundle: true,
+            format: "iife",
+            target: "es2017", // legacy ChakraCore: lower optional-chaining/nullish-coalescing/etc.
+            platform: "neutral",
+            outfile,
+            legalComments: "none",
+            logLevel: "warning",
+            banner: { js: hostPrelude },
+            plugins: activePlugins,
+            // The published package resolves "@babylonjs/lite" from node_modules. Dynamic
+            // imports inside it are inlined into the single IIFE by esbuild.
+        });
+        console.log(`bundled ${entry} -> dist/${name}${outSuffix}`);
+        __built++;
+    } catch (e) {
+        // Don't let one scene that imports an unpublished internal subpath (or otherwise
+        // fails to bundle) block the rest of the corpus.
+        console.error(`SKIP ${entry}: ${e && e.message ? e.message.split("\n")[0] : e}`);
+        __failed++;
+    }
 }
+console.log(`done: ${__built} built, ${__failed} skipped`);

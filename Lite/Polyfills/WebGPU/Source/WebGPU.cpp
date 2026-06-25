@@ -2436,6 +2436,17 @@ namespace lite::webgpu
         canvas.Set("setAttribute", Napi::Function::New(env,
             [](const Napi::CallbackInfo& info) -> Napi::Value { return info.Env().Undefined(); },
             "setAttribute"));
+        // getAttribute/hasAttribute/removeAttribute — some setup paths probe canvas attributes
+        // (e.g. engine feature detection). No real attribute store; report "absent".
+        canvas.Set("getAttribute", Napi::Function::New(env,
+            [](const Napi::CallbackInfo& info) -> Napi::Value { return info.Env().Null(); },
+            "getAttribute"));
+        canvas.Set("hasAttribute", Napi::Function::New(env,
+            [](const Napi::CallbackInfo& info) -> Napi::Value { return Napi::Boolean::New(info.Env(), false); },
+            "hasAttribute"));
+        canvas.Set("removeAttribute", Napi::Function::New(env,
+            [](const Napi::CallbackInfo& info) -> Napi::Value { return info.Env().Undefined(); },
+            "removeAttribute"));
         // Pointer/keyboard input is intentionally unsupported in the native host (no DOM
         // event loop). Provide no-op addEventListener/removeEventListener so scene code that
         // calls attachControl(camera, canvas, scene) runs unmodified — it just receives no
