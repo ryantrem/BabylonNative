@@ -15,6 +15,88 @@ ChakraCore rows omitted. Full detail + caveats in the session `files/benchmark-r
 | 4  | Native host + our Dawn/WebGPU | **Lite JS** | **render bundle** | 14.8 | 13.1 |
 | 5  | Native host + our Dawn/WebGPU | **native C++** | **render bundle** | **13.2** | **11.5** |
 | 6  | **Regular Babylon Native** (full Babylon.js + bgfx) | Babylon.js | no bundles | 483.6 | 368.6 |
+| 7  | Native host (**QuickJS**) + our Dawn/WebGPU | **Lite JS** | **render bundle** | ~27.9 | ~24.5 |
+
+### QuickJS vs V8 — the headline comparison (`cubes.glb`, 8000 draws)
+
+The point of swapping the JS engine: Lite pushes ~zero engine JS into the render loop (a
+cached opaque `GPURenderBundle` → one `executeBundles`/frame), so even a **bytecode
+interpreter** (QuickJS, no JIT) should stay far ahead of a full retained-mode engine on a
+JIT. Measured (present-excluded render-loop CPU ms/frame, NO_VSYNC):
+
+| Stack | JS engine | render-loop CPU | load time¹ | main mem² | GPU mem² | vs full BN |
+|---|---|---:|---:|---:|---:|---:|
+| **Lite Native + QuickJS** (bundle) | QuickJS (interpreter) | **~27.9 ms** (~36 fps) | ~9–35 s³ | (leak³) | ~0.10 GB⁴ | **~17× faster** |
+| Lite Native + V8 (bundle) | V8 (JIT) | ~14.8 ms | **~1.8 s**⁴ | **~0.51 GB**⁴ | **~0.10 GB**⁴ | ~33× faster |
+| Lite Native + V8 — *before suballoc fix* | V8 (JIT) | ~14.8 ms | ~3.1 s | ~2.8 GB | ~3.0 GB | — |
+| **Regular Babylon Native + V8** | V8 (JIT) | **483.6 ms** (~2 fps) | ~18.5 s | ~1.1 GB | ~0.12 GB | 1× (baseline) |
+
+¹ Load time = wall clock from process launch to scene-ready (model fetched + parsed + GPU
+  resources built + render loop starting), same 8000-cube `cubes.glb`.
+² Memory sampled at steady state: **main** = process peak working set; **GPU** = per-process
+  GPU "Dedicated Usage" (Windows perf counter). Box-scene baseline (Lite+V8): 158 MB main /
+  80 MB GPU — confirms the figures scale with the scene, not a fixed allocation.
+³ QuickJS load time is noisy and its main-mem is inflated by the napi leak-hack (see caveats),
+  so it's omitted; GPU mem matches V8 (GPU resources are engine-independent).
+⁴ **After the small-buffer suballocation fix** (see below). Before it, Lite used ~3.0 GB GPU /
+  ~2.8 GB main — *more* than full Babylon Native. After, Lite uses **~0.10 GB GPU** (104 MB
+  dedicated / 159 MB total committed — now *below* bgfx's 120 MB) and **~0.51 GB main**, and
+  loads in **1.8 s** (the 48 K individual D3D12 buffer allocations were also a load-time cost).
+
+### GPU-memory bug found and fixed: D3D12's 64 KB-per-buffer floor
+
+Instrumenting `createBuffer` revealed Lite creates **6 GPU buffers per mesh** for this model
+(3 vertex + 1 index + 2 uniform) → **48 002 buffers** holding only **8.3 MB** of real data.
+But D3D12 rounds *every* buffer up to a **64 KB placement floor** (Dawn's allocator even
+sub-allocates at `GetResourceAllocationInfo`'s 64 KB-floored size), so 48 002 × 64 KB ≈
+**3.0 GB** — matching the measured 3 086 MB almost exactly. The waste is per-buffer
+granularity, not data.
+
+**Fix (polyfill `Device::CreateBuffer`):** a small-buffer **arena suballocator**. Buffers
+below 8 KB that don't need a host-visible mapping are packed (256-aligned) into shared 4 MB
+Dawn buffers, one bucket per usage mask; `GPUBuffer` becomes a `{arena, offset}` view and
+every consuming site (`writeBuffer`, `setVertex/IndexBuffer`, bind-group entries,
+`copyBufferToBuffer`) adds the base offset. `mappedAtCreation` sub-buffers (vertex/index)
+upload via `queue.writeBuffer` into the arena at `unmap()` instead of a real GPU mapping. Net:
+**3 086 → 104 MB GPU (≈30×), 2.8 → 0.51 GB main, 3.1 → 1.8 s load** — and box/cubes/gltfenv/
+scene2/multi all render pixel-identically with zero Dawn validation errors. The proper
+upstream fix is in Lite (interleave vertex attributes, share a uniform arena with dynamic
+offsets), but the polyfill suballocator recovers the memory transparently for any scene.
+
+**Takeaway:** Lite + QuickJS (~28 ms) is **~17× faster than full Babylon Native + V8
+(~484 ms)** on the same 8000-cube model — *despite* QuickJS being a far slower JS engine
+than V8. Architecture (lean engine + render-bundle replay) dominates JS-engine speed. The
+QuickJS-vs-V8 gap within Lite (~28 vs ~15 ms, ~1.9×) is the expected interpreter-vs-JIT tax
+on the per-frame JS that the bundle doesn't eliminate (scene `_update`, frame-graph execute).
+
+**The memory/load story INVERTS the perf story (important).** Lite renders 17–33× faster but,
+on this pathological **8000-unique-mesh** model, uses **~25× more GPU memory** (~3.0 GB vs
+bgfx's 0.12 GB) and ~2.5× more main memory than full Babylon Native. Conversely Lite **loads
+faster on V8** (3.1 s vs 18.5 s — Babylon.js's per-mesh scene-graph construction over 8000
+meshes is slow), while Lite **on QuickJS loads slowly** (~9–35 s — interpreter glTF parse +
+leak-hack overhead), in the same ballpark as full BN. Net: native-Lite trades **memory for
+speed**, and the JS engine mostly moves load time, not render time.
+
+**Why Lite's GPU memory is so high (flagged for investigation):** ~3.0 GB for 8000 small
+cubes is ~25× bgfx's 0.12 GB and ~375× a naive per-cube estimate (~1 KB × 8000 ≈ 8 MB). It
+scales with mesh count (box = 80 MB), so it's per-mesh GPU-resource bloat — likely each unique
+mesh getting its own non-suballocated vertex/index/uniform buffers + bind groups through our
+WebGPU→Dawn polyfill, and/or Dawn D3D12 heap over-commit. bgfx suballocates aggressively and
+reports 0.12 GB. This is an optimization opportunity in the polyfill/Lite, not a perf-path
+issue. (It also explains why the 8000-unique-mesh case is called pathological — real scenes
+share geometry/materials and won't hit this.)
+
+**Caveats on the QuickJS numbers (render CPU is an upper bound):** obtained via Cedric's
+JsRuntimeHost `quickjs` fork (quickjs-ng) whose N-API prototype has a handle-scope/refcount
+bug (close frees borrowed values → UAF on any ObjectWrap value through a promise/callback).
+A quick hack — make `FromJSValue` dup so the scope's free balances — unblocks it but (a)
+leaks one ref at every owned-value site and (b) adds a `JS_DupValue`/`JS_FreeValue` on every
+napi value crossing, which **inflates** both the per-frame number and main-mem. A correct napi
+memory-model fix would make Lite+QuickJS *faster* and lighter than shown. Setup (8000-cube
+buffer alloc) is also intermittently flaky under the leak pressure. The V8 Lite and 483.6 ms
+full-BN render numbers are prior same-session/same-machine/same-model measurements; the load
+and memory figures were measured this session (Lite+V8 + BN+V8 rebuilt with raised bgfx
+buffer caps to render 8000 unique meshes).
 
 **Reading it:**
 - **Render path dominates, not loop language.** No-bundle (re-record 8000 draws/frame): native

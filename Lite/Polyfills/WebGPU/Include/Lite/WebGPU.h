@@ -28,17 +28,43 @@ namespace lite::webgpu
     // constructor that copies a Dawn handle smuggled in via Napi::External, and a
     // Handle() accessor the native side (or sibling wrappers) reads.
 
+    // Construction payload for a Buffer wrapper. Besides the Dawn handle it carries the
+    // sub-allocation view (baseOffset/size/isSub) so the polyfill can pack many tiny logical
+    // GPUBuffers into a few large Dawn buffers (D3D12 rounds every standalone buffer up to a
+    // 64 KB placement floor, so 8000 unique meshes × ~6 small buffers ≈ 3 GB of waste —
+    // suballocation collapses that to the real ~8 MB). For a sub-buffer, `buffer` is the
+    // shared arena, `baseOffset` is the byte offset of this logical buffer within it, and
+    // `queue` lets unmap() upload a mapped-at-creation sub-buffer via writeBuffer.
+    struct BufferInit
+    {
+        wgpu::Buffer buffer;
+        uint64_t baseOffset = 0;
+        uint64_t size = 0;
+        bool isSub = false;
+        wgpu::Queue queue;
+    };
+
     class Buffer : public Napi::ObjectWrap<Buffer>
     {
     public:
         static Napi::Function DefineClass(Napi::Env env);
         Buffer(const Napi::CallbackInfo& info);
         const wgpu::Buffer& Handle() const { return m_buffer; }
+        // Byte offset of this logical buffer within Handle() (0 unless sub-allocated). Every
+        // buffer-consuming site (writeBuffer, setVertex/IndexBuffer, bind-group entry,
+        // copyBufferToBuffer) adds this to the caller's local offset.
+        uint64_t BaseOffset() const { return m_baseOffset; }
+        uint64_t Size() const { return m_size; }
+        bool IsSub() const { return m_isSub; }
         Napi::Value GetMappedRange(const Napi::CallbackInfo& info);
         Napi::Value Unmap(const Napi::CallbackInfo& info);
         Napi::Value Destroy(const Napi::CallbackInfo& info);
     private:
         wgpu::Buffer m_buffer;
+        uint64_t m_baseOffset = 0;  // sub-allocation offset within m_buffer (arena)
+        uint64_t m_size = 0;        // logical buffer size
+        bool m_isSub = false;       // true if m_buffer is a shared arena
+        wgpu::Queue m_queue;        // device queue (used to upload mapped sub-buffers at unmap)
         // Outstanding getMappedRange() allocations. ChakraCore's N-API does NOT alias
         // external ArrayBuffers (Napi::ArrayBuffer::New(env, ptr, size) gives JS a private
         // copy), so we hand JS an engine-owned ArrayBuffer and copy it into Dawn's mapped
@@ -314,6 +340,28 @@ namespace lite::webgpu
     private:
         wgpu::Device m_device;
         Napi::ObjectReference m_queue;
+
+        // ---- Small-buffer suballocation arena ----------------------------------------
+        // D3D12 rounds every standalone buffer up to a 64 KB placement floor, so scenes
+        // with thousands of tiny per-mesh vertex/index/uniform buffers waste enormous VRAM.
+        // We pack buffers smaller than kSubAllocMax into shared arena buffers (one bucket
+        // per requested usage mask) and hand out {arena, offset} views. Buffers needing a
+        // host-visible mapping (MAP_READ/MAP_WRITE) or larger than the threshold are created
+        // standalone. mappedAtCreation sub-buffers are uploaded via queue.writeBuffer at
+        // unmap() instead of a real GPU mapping.
+        struct SubArena
+        {
+            uint32_t usage = 0;        // exact JS-requested usage mask this arena serves
+            wgpu::Buffer buffer;       // backing buffer, created with (usage | CopyDst)
+            uint64_t capacity = 0;
+            uint64_t used = 0;
+        };
+        std::vector<SubArena> m_arenas;
+        wgpu::Queue m_arenaQueue;
+        // Try to carve `size` bytes for a buffer of `usage` from an arena. Returns true and
+        // fills outArena/outOffset on success; false means the caller should create a
+        // standalone Dawn buffer.
+        bool SubAllocate(uint64_t size, uint32_t usage, wgpu::Buffer& outArena, uint64_t& outOffset);
     };
 
     // GPUCanvasContext — canvas.getContext("webgpu"). Wraps the Module's HWND-bound
@@ -435,6 +483,8 @@ namespace lite::webgpu
         Napi::Object WrapAdapter(Napi::Env env, const wgpu::Adapter& adapter) const;
 
         // Wrapper factories used by Device's create* methods and the native bridge.
+        Napi::Object WrapBuffer(Napi::Env env, const BufferInit& init) const;
+        // Convenience: wrap a standalone (non-suballocated) Dawn buffer.
         Napi::Object WrapBuffer(Napi::Env env, const wgpu::Buffer& buffer) const;
         Napi::Object WrapTexture(Napi::Env env, const wgpu::Texture& texture) const;
         Napi::Object WrapTextureView(Napi::Env env, const wgpu::TextureView& view) const;

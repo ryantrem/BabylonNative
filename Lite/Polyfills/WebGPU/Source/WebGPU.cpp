@@ -93,14 +93,76 @@ namespace lite::webgpu
             ProfSlot slot;
             std::chrono::steady_clock::time_point t0;
             explicit ScopedProf(ProfSlot s) : slot(s), t0(std::chrono::steady_clock::now()) {}
-            ~ScopedProf()
+        };
+
+        // ---- GPU resource-allocation profiler (LITE_MEM_PROFILE=1) -----------------
+        // Tracks how many GPU buffers/textures the polyfill creates and their requested
+        // byte totals, broken down by WebGPU buffer-usage class. Surfaces per-mesh GPU
+        // memory bloat (e.g. 8000 unique meshes → thousands of tiny vertex/index/uniform
+        // buffers, each possibly rounded up to a Dawn/D3D12 heap-alignment minimum). Dumps
+        // a running summary every 4000 buffer creations and on demand. "requested" is the
+        // logical byte total; the driver's actual VRAM footprint is higher due to per-buffer
+        // alignment/min-size — comparing the two quantifies the suballocation opportunity.
+        struct MemProfiler
+        {
+            bool enabled = false;
+            uint64_t bufCount = 0;
+            uint64_t bufBytes = 0;
+            uint64_t bufBytesAligned256 = 0;   // each buffer rounded up to 256 B
+            uint64_t bufBytesAligned64K = 0;    // each buffer rounded up to 64 KB (D3D12 placed-resource floor)
+            uint64_t texCount = 0;
+            uint64_t texBytes = 0;
+            uint64_t mappedAtCreationCount = 0;
+            uint64_t mappedAtCreationBytes = 0;
+            // Per-usage-bit buffer counts/bytes (VERTEX, INDEX, UNIFORM, STORAGE, COPY_DST, MAP_*).
+            uint64_t usageCount[12] = {0};
+            uint64_t usageBytes[12] = {0};
+            const char* usageName[12] = {
+                "MAP_READ","MAP_WRITE","COPY_SRC","COPY_DST","INDEX","VERTEX",
+                "UNIFORM","STORAGE","INDIRECT","QUERY_RESOLVE","u10","u11"
+            };
+
+            MemProfiler()
             {
-                if (!g_prof.enabled) return;
-                double ns = std::chrono::duration<double, std::nano>(
-                    std::chrono::steady_clock::now() - t0).count();
-                g_prof.add(slot, ns);
+                const char* v = std::getenv("LITE_MEM_PROFILE");
+                enabled = v != nullptr && (v[0] == '1' || v[0] == 't' || v[0] == 'T');
+            }
+            static uint64_t alignUp(uint64_t n, uint64_t a) { return (n + a - 1) / a * a; }
+            void addBuffer(uint64_t size, uint32_t usage, bool mappedAtCreation = false)
+            {
+                if (!enabled) return;
+                bufCount++;
+                bufBytes += size;
+                bufBytesAligned256 += alignUp(size, 256);
+                bufBytesAligned64K += alignUp(size, 64 * 1024);
+                if (mappedAtCreation) { mappedAtCreationCount++; mappedAtCreationBytes += size; }
+                for (int b = 0; b < 12; ++b)
+                    if (usage & (1u << b)) { usageCount[b]++; usageBytes[b] += size; }
+                if (bufCount % 4000 == 0) dump("interval");
+            }
+            void addTexture(uint64_t size)
+            {
+                if (!enabled) return;
+                texCount++;
+                texBytes += size;
+            }
+            void dump(const char* tag)
+            {
+                if (!enabled) return;
+                std::fprintf(stderr, "[memprof:%s] buffers=%llu requested=%.1fMB align256=%.1fMB align64K=%.1fMB | mappedAtCreation=%llu (%.1fMB) | textures=%llu ~%.1fMB\n",
+                    tag, (unsigned long long)bufCount, bufBytes / 1048576.0,
+                    bufBytesAligned256 / 1048576.0, bufBytesAligned64K / 1048576.0,
+                    (unsigned long long)mappedAtCreationCount, mappedAtCreationBytes / 1048576.0,
+                    (unsigned long long)texCount, texBytes / 1048576.0);
+                for (int b = 0; b < 12; ++b)
+                    if (usageCount[b])
+                        std::fprintf(stderr, "[memprof:%s]   %-13s count=%llu bytes=%.2fMB avg=%lluB\n",
+                            tag, usageName[b], (unsigned long long)usageCount[b],
+                            usageBytes[b] / 1048576.0,
+                            (unsigned long long)(usageBytes[b] / usageCount[b]));
             }
         };
+        MemProfiler g_mem;
 
         // Decoded RGBA8 image moved from createImageBitmap into an ImageBitmap wrapper via
         // an N-API External (avoids copying the pixel buffer across the boundary).
@@ -490,7 +552,14 @@ namespace lite::webgpu
     Buffer::Buffer(const Napi::CallbackInfo& info) : Napi::ObjectWrap<Buffer>{info}
     {
         if (info.Length() >= 1 && info[0].IsExternal())
-            m_buffer = *info[0].As<Napi::External<wgpu::Buffer>>().Data();
+        {
+            const BufferInit& init = *info[0].As<Napi::External<BufferInit>>().Data();
+            m_buffer = init.buffer;
+            m_baseOffset = init.baseOffset;
+            m_size = init.size;
+            m_isSub = init.isSub;
+            m_queue = init.queue;
+        }
     }
     // getMappedRange(offset?, size?) -> ArrayBuffer for writing into a mappedAtCreation
     // buffer. ChakraCore's N-API does NOT alias external memory, so we hand JS a normal
@@ -502,9 +571,11 @@ namespace lite::webgpu
             ? static_cast<uint64_t>(info[0].As<Napi::Number>().Int64Value()) : 0;
         uint64_t size = info.Length() >= 2 && info[1].IsNumber()
             ? static_cast<uint64_t>(info[1].As<Napi::Number>().Int64Value())
-            : (m_buffer.GetSize() - offset);
-        // Validate the Dawn buffer is actually mapped before allocating the staging copy.
-        if (m_buffer.GetMappedRange(offset, static_cast<size_t>(size)) == nullptr)
+            : (m_size - offset);
+        // For a real (standalone) buffer, validate it's actually mapped. A sub-buffer has no
+        // GPU mapping — its data is staged in the returned ArrayBuffer and uploaded to the
+        // arena via queue.writeBuffer at unmap().
+        if (!m_isSub && m_buffer.GetMappedRange(offset, static_cast<size_t>(size)) == nullptr)
         {
             Napi::Error::New(env, "getMappedRange: buffer is not mapped").ThrowAsJavaScriptException();
             return env.Undefined();
@@ -515,24 +586,35 @@ namespace lite::webgpu
     }
     Napi::Value Buffer::Unmap(const Napi::CallbackInfo& info)
     {
-        // Flush each staging ArrayBuffer into Dawn's mapped memory before unmapping.
+        // Flush each staging ArrayBuffer into the GPU before unmapping. Standalone buffers
+        // memcpy into Dawn's mapped memory; sub-buffers upload into the shared arena at their
+        // base offset via the queue (the arena is never CPU-mapped).
         for (auto& r : m_mappedRanges)
         {
-            void* dst = m_buffer.GetMappedRange(r.offset, static_cast<size_t>(r.size));
-            if (dst != nullptr)
+            Napi::ArrayBuffer ab = r.ref.Value();
+            if (m_isSub)
             {
-                Napi::ArrayBuffer ab = r.ref.Value();
-                std::memcpy(dst, ab.Data(), static_cast<size_t>(r.size));
+                if (m_queue != nullptr)
+                    m_queue.WriteBuffer(m_buffer, m_baseOffset + r.offset, ab.Data(),
+                        static_cast<size_t>(r.size));
+            }
+            else
+            {
+                void* dst = m_buffer.GetMappedRange(r.offset, static_cast<size_t>(r.size));
+                if (dst != nullptr)
+                    std::memcpy(dst, ab.Data(), static_cast<size_t>(r.size));
             }
             r.ref.Reset();
         }
         m_mappedRanges.clear();
-        m_buffer.Unmap();
+        if (!m_isSub) m_buffer.Unmap();
         return info.Env().Undefined();
     }
     Napi::Value Buffer::Destroy(const Napi::CallbackInfo& info)
     {
-        m_buffer.Destroy();
+        // Never destroy a shared arena from one sub-buffer; the slice simply leaks within the
+        // arena until the arena (and Device) is torn down.
+        if (!m_isSub) m_buffer.Destroy();
         return info.Env().Undefined();
     }
 
@@ -787,7 +869,7 @@ namespace lite::webgpu
         }
         // Optional dataOffset (elements) + size (elements) are accepted but the common
         // whole-buffer form is used here.
-        m_queue.WriteBuffer(buffer->Handle(), bufferOffset, data, size);
+        m_queue.WriteBuffer(buffer->Handle(), buffer->BaseOffset() + bufferOffset, data, size);
         return env.Undefined();
     }
 
@@ -976,7 +1058,7 @@ namespace lite::webgpu
         uint32_t slot = info[0].As<Napi::Number>().Uint32Value();
         Buffer* b = info[1].IsObject() ? Module::Current()->AsBuffer(info[1].As<Napi::Object>()) : nullptr;
         uint64_t offset = info.Length() >= 3 && info[2].IsNumber() ? info[2].As<Napi::Number>().Int64Value() : 0;
-        if (b != nullptr) m_pass.SetVertexBuffer(slot, b->Handle(), offset);
+        if (b != nullptr) m_pass.SetVertexBuffer(slot, b->Handle(), b->BaseOffset() + offset);
         return info.Env().Undefined();
     }
     Napi::Value RenderPassEncoder::SetIndexBuffer(const Napi::CallbackInfo& info)
@@ -985,7 +1067,7 @@ namespace lite::webgpu
         std::string fmt = info.Length() >= 2 && info[1].IsString() ? info[1].As<Napi::String>().Utf8Value() : "uint32";
         wgpu::IndexFormat f = fmt == "uint16" ? wgpu::IndexFormat::Uint16 : wgpu::IndexFormat::Uint32;
         uint64_t offset = info.Length() >= 3 && info[2].IsNumber() ? info[2].As<Napi::Number>().Int64Value() : 0;
-        if (b != nullptr) m_pass.SetIndexBuffer(b->Handle(), f, offset);
+        if (b != nullptr) m_pass.SetIndexBuffer(b->Handle(), f, b->BaseOffset() + offset);
         return info.Env().Undefined();
     }
     Napi::Value RenderPassEncoder::Draw(const Napi::CallbackInfo& info)
@@ -1095,7 +1177,7 @@ namespace lite::webgpu
         uint32_t slot = info[0].As<Napi::Number>().Uint32Value();
         Buffer* b = info[1].IsObject() ? Module::Current()->AsBuffer(info[1].As<Napi::Object>()) : nullptr;
         uint64_t offset = info.Length() >= 3 && info[2].IsNumber() ? info[2].As<Napi::Number>().Int64Value() : 0;
-        if (b != nullptr) m_encoder.SetVertexBuffer(slot, b->Handle(), offset);
+        if (b != nullptr) m_encoder.SetVertexBuffer(slot, b->Handle(), b->BaseOffset() + offset);
         return info.Env().Undefined();
     }
     Napi::Value RenderBundleEncoder::SetIndexBuffer(const Napi::CallbackInfo& info)
@@ -1104,7 +1186,7 @@ namespace lite::webgpu
         std::string fmt = info.Length() >= 2 && info[1].IsString() ? info[1].As<Napi::String>().Utf8Value() : "uint32";
         wgpu::IndexFormat f = fmt == "uint16" ? wgpu::IndexFormat::Uint16 : wgpu::IndexFormat::Uint32;
         uint64_t offset = info.Length() >= 3 && info[2].IsNumber() ? info[2].As<Napi::Number>().Int64Value() : 0;
-        if (b != nullptr) m_encoder.SetIndexBuffer(b->Handle(), f, offset);
+        if (b != nullptr) m_encoder.SetIndexBuffer(b->Handle(), f, b->BaseOffset() + offset);
         return info.Env().Undefined();
     }
     Napi::Value RenderBundleEncoder::Draw(const Napi::CallbackInfo& info)
@@ -1263,7 +1345,8 @@ namespace lite::webgpu
         uint64_t dstOffset = info.Length() >= 4 && info[3].IsNumber() ? static_cast<uint64_t>(info[3].As<Napi::Number>().Int64Value()) : 0;
         uint64_t size = info.Length() >= 5 && info[4].IsNumber() ? static_cast<uint64_t>(info[4].As<Napi::Number>().Int64Value()) : 0;
         if (src != nullptr && dst != nullptr)
-            m_encoder.CopyBufferToBuffer(src->Handle(), srcOffset, dst->Handle(), dstOffset, size);
+            m_encoder.CopyBufferToBuffer(src->Handle(), src->BaseOffset() + srcOffset,
+                dst->Handle(), dst->BaseOffset() + dstOffset, size);
         return info.Env().Undefined();
     }
 
@@ -1300,16 +1383,80 @@ namespace lite::webgpu
         return m_queue.IsEmpty() ? info.Env().Undefined() : m_queue.Value();
     }
 
+    // Pack small, non-host-visible buffers into shared arenas to dodge D3D12's 64 KB
+    // per-buffer placement floor. Returns true (with arena+offset) when suballocated.
+    bool Device::SubAllocate(uint64_t size, uint32_t usage, wgpu::Buffer& outArena, uint64_t& outOffset)
+    {
+        // Only small buffers benefit; large ones already amortize the 64 KB floor. Skip
+        // host-visible buffers (MAP_READ=0x1 / MAP_WRITE=0x2) — those need a real mappable
+        // allocation, not a slice of a DEFAULT-heap arena.
+        constexpr uint64_t kSubAllocMax = 8192;   // bytes; cubes' buffers are ≤256 B
+        constexpr uint64_t kArenaSize = 4 * 1024 * 1024;
+        constexpr uint64_t kAlign = 256;          // satisfies uniform/storage bind offset alignment
+        if (size == 0 || size > kSubAllocMax) return false;
+        if (usage & 0x3u) return false;           // MAP_READ | MAP_WRITE
+
+        if (m_arenaQueue == nullptr) m_arenaQueue = m_device.GetQueue();
+        const uint64_t need = (size + kAlign - 1) / kAlign * kAlign;
+
+        for (auto& a : m_arenas)
+        {
+            if (a.usage == usage && a.capacity - a.used >= need)
+            {
+                outArena = a.buffer;
+                outOffset = a.used;
+                a.used += need;
+                return true;
+            }
+        }
+        // No arena for this usage with room — make a new one (CopyDst so we can upload).
+        SubArena arena{};
+        arena.usage = usage;
+        arena.capacity = need > kArenaSize ? need : kArenaSize;
+        wgpu::BufferDescriptor ad{};
+        ad.size = arena.capacity;
+        ad.usage = static_cast<wgpu::BufferUsage>(usage | 0x8u); // | COPY_DST
+        ad.mappedAtCreation = false;
+        arena.buffer = m_device.CreateBuffer(&ad);
+        if (arena.buffer == nullptr) return false;
+        arena.used = need;
+        outArena = arena.buffer;
+        outOffset = 0;
+        m_arenas.push_back(std::move(arena));
+        return true;
+    }
+
     Napi::Value Device::CreateBuffer(const Napi::CallbackInfo& info)
     {
         Napi::Env env = info.Env();
         Napi::Object d = info[0].As<Napi::Object>();
+        const uint64_t size = static_cast<uint64_t>(GetNumber(d, "size", 0));
+        const uint32_t usage = static_cast<uint32_t>(GetNumber(d, "usage", 0));
+        const bool mappedAtCreation = GetBool(d, "mappedAtCreation", false);
+        g_mem.addBuffer(size, usage, mappedAtCreation);
+
+        wgpu::Buffer arena;
+        uint64_t arenaOffset = 0;
+        if (SubAllocate(size, usage, arena, arenaOffset))
+        {
+            BufferInit init{};
+            init.buffer = arena;
+            init.baseOffset = arenaOffset;
+            init.size = size;
+            init.isSub = true;
+            init.queue = m_arenaQueue;
+            return Module::Current()->WrapBuffer(env, init);
+        }
+
         wgpu::BufferDescriptor desc{};
-        desc.size = static_cast<uint64_t>(GetNumber(d, "size", 0));
-        desc.usage = static_cast<wgpu::BufferUsage>(static_cast<uint32_t>(GetNumber(d, "usage", 0)));
-        desc.mappedAtCreation = GetBool(d, "mappedAtCreation", false);
+        desc.size = size;
+        desc.usage = static_cast<wgpu::BufferUsage>(usage);
+        desc.mappedAtCreation = mappedAtCreation;
         wgpu::Buffer buffer = m_device.CreateBuffer(&desc);
-        return Module::Current()->WrapBuffer(env, buffer);
+        BufferInit init{};
+        init.buffer = buffer;
+        init.size = size;
+        return Module::Current()->WrapBuffer(env, init);
     }
 
     Napi::Value Device::CreateTexture(const Napi::CallbackInfo& info)
@@ -1324,6 +1471,15 @@ namespace lite::webgpu
         desc.sampleCount = static_cast<uint32_t>(GetNumber(d, "sampleCount", 1));
         desc.dimension = wgpu::TextureDimension::e2D;
         wgpu::Texture texture = m_device.CreateTexture(&desc);
+        {
+            // Rough VRAM estimate: w*h*layers*bytesPerPixel(format-agnostic 4B approx)*mips(~1.33).
+            uint64_t bpp = 4;
+            uint64_t px = static_cast<uint64_t>(desc.size.width) * desc.size.height *
+                desc.size.depthOrArrayLayers;
+            uint64_t bytes = px * bpp;
+            if (desc.mipLevelCount > 1) bytes = bytes * 4 / 3;
+            g_mem.addTexture(bytes);
+        }
         return Module::Current()->WrapTexture(env, texture);
     }
 
@@ -1454,8 +1610,11 @@ namespace lite::webgpu
                     if (buf != nullptr)
                     {
                         w.buffer = buf->Handle();
-                        w.offset = static_cast<uint64_t>(GetNumber(ro, "offset", 0));
+                        w.offset = buf->BaseOffset() + static_cast<uint64_t>(GetNumber(ro, "offset", 0));
                         if (ro.Has("size")) w.size = static_cast<uint64_t>(GetNumber(ro, "size", 0));
+                        else if (buf->IsSub()) w.size = buf->Size(); // must bound the binding to
+                            // this logical sub-buffer; otherwise it spans the whole arena and
+                            // (for uniforms) exceeds maxUniformBufferBindingSize.
                     }
                 }
                 else if (Sampler* samp = mod->AsSampler(ro))
@@ -2067,6 +2226,9 @@ namespace lite::webgpu
             m_instance.ProcessEvents();
         }
         g_prof.endFrame(); // present is once per frame → frame boundary for the profiler
+        // One-shot GPU-allocation dump shortly after load (frame 10) so all setup buffers
+        // are counted but we don't spam every frame.
+        if (g_mem.enabled) { static uint64_t s_memFrame = 0; if (++s_memFrame == 10) g_mem.dump("post-load"); }
     }
 
     void Module::ReadbackAndLog(const char* label)
@@ -2395,10 +2557,17 @@ namespace lite::webgpu
         return m_adapterCtor.New({Napi::External<wgpu::Adapter>::New(env, &local)});
     }
 
-    Napi::Object Module::WrapBuffer(Napi::Env env, const wgpu::Buffer& b) const
+    Napi::Object Module::WrapBuffer(Napi::Env env, const BufferInit& init) const
     {
-        wgpu::Buffer local = b;
-        return m_bufferCtor.New({Napi::External<wgpu::Buffer>::New(env, &local)});
+        BufferInit local = init;
+        return m_bufferCtor.New({Napi::External<BufferInit>::New(env, &local)});
+    }
+    Napi::Object Module::WrapBuffer(Napi::Env env, const wgpu::Buffer& buffer) const
+    {
+        BufferInit init{};
+        init.buffer = buffer;
+        init.size = buffer != nullptr ? buffer.GetSize() : 0;
+        return WrapBuffer(env, init);
     }
     Napi::Object Module::WrapTexture(Napi::Env env, const wgpu::Texture& t) const
     {
