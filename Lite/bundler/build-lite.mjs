@@ -44,38 +44,6 @@ const lowerBigIntLiterals = {
     },
 };
 
-// Selective render-loop externalization: redirect the scene's render-loop imports
-// (`startEngine`, `stopEngine`, `renderFrame`) from `babylon-lite` to the NATIVE global
-// (BabylonNativeLite.*), while everything else comes from real Lite. The native render
-// loop replaces these; because the scene imports them from the virtual module (which does
-// NOT re-import them from real Lite), real Lite's renderFrame/executePass/executePassBody/
-// drawList and their exclusive callees are tree-shaken OUT of the bundle entirely. All
-// other Lite APIs (createEngine/scene/material/mesh/registerScene/...) stay real JS.
-const NATIVE_LOOP_EXPORTS = ["startEngine", "stopEngine", "renderFrame"];
-const overrideLoopExports = {
-    name: "override-loop-exports",
-    setup(b) {
-        // Match both the unscoped source name and the published scoped name.
-        b.onResolve({ filter: /^(babylon-lite|@babylonjs\/lite)$/ }, (args) => {
-            if (args.namespace === "loop-override") return undefined; // avoid recursion
-            return { path: "virtual-lite", namespace: "loop-override" };
-        });
-        b.onLoad({ filter: /^virtual-lite$/, namespace: "loop-override" }, () => {
-            // Re-export everything from real Lite EXCEPT the render-loop functions, which
-            // come from the native global. The opaque render bundle + pipelines + UBOs are
-            // now built by real Lite's record() at registerScene (setup) — so no JS
-            // warm-up frame is needed and renderFrame never has to run (or ship).
-            let s = `export * from ${JSON.stringify(realLiteEntry)};\n`;
-            s += `const __bnl = (typeof globalThis !== "undefined" && globalThis.BabylonNativeLite)`;
-            s += ` ? globalThis.BabylonNativeLite : BabylonNativeLite;\n`;
-            for (const name of NATIVE_LOOP_EXPORTS) {
-                s += `export const ${name} = __bnl.${name};\n`;
-            }
-            return { contents: s, loader: "js", resolveDir: here };
-        });
-    },
-};
-
 const entries = existsSync(scenesDir)
     ? readdirSync(scenesDir).filter((f) => f.endsWith(".ts") || f.endsWith(".js"))
     : [];
@@ -84,32 +52,20 @@ if (entries.length === 0) {
     process.exit(1);
 }
 
-// Loop mode (current project direction): the DEFAULT build runs the REAL Babylon Lite JS
-// render loop in-app (startEngine/renderFrame stay real Lite, driven by the native
-// requestAnimationFrame polyfill). Only the WebGPU layer is native. This is the standing
-// configuration — all Lite JS executes; we just implement WebGPU.
-//
-// The native C++ render loop (and the native Lite-API plugin) is RETAINED but OPT-IN: set
-// LITE_NATIVE_LOOP=1 to build the variant that externalizes the render-loop functions onto
-// the native BabylonNativeLite global. Its output is suffixed `.nativeloop.lite.js` so it can
-// sit alongside the default all-JS bundle. (LITE_JS_LOOP is accepted as a deprecated no-op
-// alias for the default since the JS loop is now the default.)
-const nativeLoop = process.env.LITE_NATIVE_LOOP === "1";
-const jsLoop = !nativeLoop; // default: all Lite JS executes; native loop is opt-in
-const outSuffix = nativeLoop ? ".nativeloop.lite.js" : ".lite.js";
-
-// In JS-loop mode we don't externalize the render-loop functions (real Lite's
-// startEngine/renderFrame run in-app). But the scene still imports from the bare
-// "babylon-lite" specifier, which the externalization plugin normally resolves — so
-// provide a plain alias plugin that points "babylon-lite"/"@babylonjs/lite" at the local
-// dist with NO export rewriting.
+// WebGPU-only baseline: the build runs the REAL Babylon Lite JS render loop in-app
+// (startEngine/renderFrame are real Lite, driven by the native requestAnimationFrame
+// pump in NativeLite). Only the WebGPU layer is native — all Lite JS executes; we just
+// implement WebGPU over Dawn. The scene imports from the bare "babylon-lite" /
+// "@babylonjs/lite" specifier; alias it to the local Lite dist with NO export rewriting
+// (no render-loop externalization).
+const outSuffix = ".lite.js";
 const aliasLiteOnly = {
     name: "alias-lite-only",
     setup(b) {
         b.onResolve({ filter: /^(babylon-lite|@babylonjs\/lite)$/ }, () => ({ path: realLiteEntry }));
     },
 };
-const activePlugins = jsLoop ? [aliasLiteOnly, lowerBigIntLiterals] : [overrideLoopExports, lowerBigIntLiterals];
+const activePlugins = [aliasLiteOnly, lowerBigIntLiterals];
 
 for (const entry of entries) {
     const name = entry.replace(/\.(ts|js)$/, "");
