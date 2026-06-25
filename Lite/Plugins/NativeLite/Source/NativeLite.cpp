@@ -1048,6 +1048,12 @@ namespace lite::nativelite
                 body.Set("removeChild", noop);
                 body.Set("setAttribute", noop);
                 document.Set("body", body);
+                // document.head — Lite may inject a <style>/<canvas> into the head during
+                // setup; provide a no-op container so head.appendChild(...) doesn't throw.
+                Napi::Object head = Napi::Object::New(env);
+                head.Set("appendChild", noop);
+                head.Set("removeChild", noop);
+                document.Set("head", head);
             }
             env.Global().Set("document", document);
 
