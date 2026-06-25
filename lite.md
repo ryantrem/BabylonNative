@@ -86,7 +86,38 @@ reports 0.12 GB. This is an optimization opportunity in the polyfill/Lite, not a
 issue. (It also explains why the 8000-unique-mesh case is called pathological — real scenes
 share geometry/materials and won't hit this.)
 
-**Caveats on the QuickJS numbers (render CPU is an upper bound):** obtained via Cedric's
+### Why QuickJS load is ~5× slower than V8 (it's interpreter compute, not the napi layer)
+
+The QuickJS load looked suspiciously slow (the glTF *loader* in Lite is algorithmically much
+leaner than Babylon.js, so one might expect QuickJS to "even out" against full BN). Phase-timed
+profiling (per-phase JS timing + native wall-time accumulators inside `createBuffer`/
+`writeBuffer`) shows where it goes, on the same `cubes.glb`:
+
+| Phase | V8 | QuickJS | ratio |
+|---|---:|---:|---:|
+| createEngine (Dawn device init) | 290 ms | 298 ms | 1.0× |
+| **loadGltf** (fetch + parse + GPU upload) | **733 ms** | **~3600 ms** | **~5×** |
+| registerScene (render-bundle build) | 187 ms | 504 ms | 2.7× |
+| startEngine | 26 ms | 70 ms | 2.7× |
+| **TOTAL** | **1.25 s** | **~4.5 s** | **~3.7×** |
+| *native* `createBuffer` (48 002 calls) | *86.6 ms* | *99.5 ms* | *1.15×* |
+| *native* `writeBuffer` (16 003 calls) | *17.9 ms* | *16.7 ms* | *0.93×* |
+
+**Key result: the native/Dawn work is identical (~100 ms on both engines)** — so the
+napi-crossing cost (and the QuickJS leak-hack's per-call `JS_DupValue`/`JS_FreeValue`) is **not**
+the bottleneck; it adds only ~13 ms across 48 K calls. The slowdown is **pure-JS execution**:
+parsing a 14 MB binary glTF and decoding 8000 nodes' accessors/meshes is tight compute-heavy JS,
+exactly what a JIT (V8) accelerates and a bytecode interpreter (QuickJS) does not. So `loadGltf`
+takes the full ~5× interpreter penalty, while the render loop only sees ~2× (it's mostly the
+native render-bundle replay, with little per-frame JS).
+
+This means Lite's faster-than-Babylon.js loader and the JS-engine choice are **independent**
+axes: Lite's loader is the same lean algorithm on both engines, but running it on QuickJS still
+pays a ~5× interpreter tax on the parse. A correct (non-leaking) QuickJS napi backend would
+**not** materially speed up load — the cost is interpreter compute, not the leak. (It would,
+however, remove the load-time flakiness and the inflated main-mem.)
+
+
 JsRuntimeHost `quickjs` fork (quickjs-ng) whose N-API prototype has a handle-scope/refcount
 bug (close frees borrowed values → UAF on any ObjectWrap value through a promise/callback).
 A quick hack — make `FromJSValue` dup so the scope's free balances — unblocks it but (a)

@@ -114,6 +114,11 @@ namespace lite::webgpu
             uint64_t texBytes = 0;
             uint64_t mappedAtCreationCount = 0;
             uint64_t mappedAtCreationBytes = 0;
+            // Cumulative wall time spent inside the two hot resource calls, to separate the
+            // engine-independent native work + napi-marshaling cost from pure-JS glTF parse.
+            double createBufferNs = 0;
+            double writeBufferNs = 0;
+            uint64_t writeBufferCalls = 0;
             // Per-usage-bit buffer counts/bytes (VERTEX, INDEX, UNIFORM, STORAGE, COPY_DST, MAP_*).
             uint64_t usageCount[12] = {0};
             uint64_t usageBytes[12] = {0};
@@ -154,6 +159,9 @@ namespace lite::webgpu
                     bufBytesAligned256 / 1048576.0, bufBytesAligned64K / 1048576.0,
                     (unsigned long long)mappedAtCreationCount, mappedAtCreationBytes / 1048576.0,
                     (unsigned long long)texCount, texBytes / 1048576.0);
+                std::fprintf(stderr, "[memprof:%s]   TIME createBuffer=%.1fms (%llu calls) writeBuffer=%.1fms (%llu calls)\n",
+                    tag, createBufferNs / 1e6, (unsigned long long)bufCount,
+                    writeBufferNs / 1e6, (unsigned long long)writeBufferCalls);
                 for (int b = 0; b < 12; ++b)
                     if (usageCount[b])
                         std::fprintf(stderr, "[memprof:%s]   %-13s count=%llu bytes=%.2fMB avg=%lluB\n",
@@ -847,6 +855,7 @@ namespace lite::webgpu
     Napi::Value Queue::WriteBuffer(const Napi::CallbackInfo& info)
     {
         ScopedProf _p(P_writeBuffer);
+        auto _t0 = std::chrono::steady_clock::now();
         Napi::Env env = info.Env();
         if (info.Length() < 3 || !info[0].IsObject())
         {
@@ -870,6 +879,8 @@ namespace lite::webgpu
         // Optional dataOffset (elements) + size (elements) are accepted but the common
         // whole-buffer form is used here.
         m_queue.WriteBuffer(buffer->Handle(), buffer->BaseOffset() + bufferOffset, data, size);
+        if (g_mem.enabled) { g_mem.writeBufferNs += std::chrono::duration<double, std::nano>(
+            std::chrono::steady_clock::now() - _t0).count(); g_mem.writeBufferCalls++; }
         return env.Undefined();
     }
 
@@ -1428,6 +1439,7 @@ namespace lite::webgpu
 
     Napi::Value Device::CreateBuffer(const Napi::CallbackInfo& info)
     {
+        auto _t0 = std::chrono::steady_clock::now();
         Napi::Env env = info.Env();
         Napi::Object d = info[0].As<Napi::Object>();
         const uint64_t size = static_cast<uint64_t>(GetNumber(d, "size", 0));
@@ -1445,7 +1457,10 @@ namespace lite::webgpu
             init.size = size;
             init.isSub = true;
             init.queue = m_arenaQueue;
-            return Module::Current()->WrapBuffer(env, init);
+            Napi::Object r = Module::Current()->WrapBuffer(env, init);
+            if (g_mem.enabled) g_mem.createBufferNs += std::chrono::duration<double, std::nano>(
+                std::chrono::steady_clock::now() - _t0).count();
+            return r;
         }
 
         wgpu::BufferDescriptor desc{};
@@ -1456,7 +1471,10 @@ namespace lite::webgpu
         BufferInit init{};
         init.buffer = buffer;
         init.size = size;
-        return Module::Current()->WrapBuffer(env, init);
+        Napi::Object r = Module::Current()->WrapBuffer(env, init);
+        if (g_mem.enabled) g_mem.createBufferNs += std::chrono::duration<double, std::nano>(
+            std::chrono::steady_clock::now() - _t0).count();
+        return r;
     }
 
     Napi::Value Device::CreateTexture(const Napi::CallbackInfo& info)

@@ -22,6 +22,8 @@
 
 #include <Lite/NativeLite.h>
 
+#if defined(LITE_ENGINE_V8)
+
 #include <napi/env.h> // brings v8.h + Napi::GetContext(Napi::Env) -> v8::Local<v8::Context>
 #include <v8-fast-api-calls.h>
 
@@ -138,3 +140,12 @@ namespace lite::nativelite
         std::fprintf(stderr, "[microbench] probes installed (_mbNapi*/_mbV8*/_mbV8Fast*)\n");
     }
 }
+
+#else // !LITE_ENGINE_V8 — the V8-direct/fast-API probes don't apply; install nothing.
+
+namespace lite::nativelite
+{
+    void InstallMicrobench(Napi::Env /*env*/) {}
+}
+
+#endif // LITE_ENGINE_V8
