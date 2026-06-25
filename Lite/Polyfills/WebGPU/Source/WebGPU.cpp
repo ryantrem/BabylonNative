@@ -396,6 +396,24 @@ namespace lite::webgpu
             if (s == "rg8unorm") return wgpu::TextureFormat::RG8Unorm;
             if (s == "rgba16float") return wgpu::TextureFormat::RGBA16Float;
             if (s == "rgba32float") return wgpu::TextureFormat::RGBA32Float;
+            // Block-compressed (BC/DXT) — KTX2/.dds textures upload in these. Without them a
+            // compressed texture would default to RGBA8Unorm and Dawn's required-size check
+            // would reject the (much smaller) compressed data. Requires the device's
+            // texture-compression-bc feature (negotiated at requestDevice).
+            if (s == "bc1-rgba-unorm") return wgpu::TextureFormat::BC1RGBAUnorm;
+            if (s == "bc1-rgba-unorm-srgb") return wgpu::TextureFormat::BC1RGBAUnormSrgb;
+            if (s == "bc2-rgba-unorm") return wgpu::TextureFormat::BC2RGBAUnorm;
+            if (s == "bc2-rgba-unorm-srgb") return wgpu::TextureFormat::BC2RGBAUnormSrgb;
+            if (s == "bc3-rgba-unorm") return wgpu::TextureFormat::BC3RGBAUnorm;
+            if (s == "bc3-rgba-unorm-srgb") return wgpu::TextureFormat::BC3RGBAUnormSrgb;
+            if (s == "bc4-r-unorm") return wgpu::TextureFormat::BC4RUnorm;
+            if (s == "bc4-r-snorm") return wgpu::TextureFormat::BC4RSnorm;
+            if (s == "bc5-rg-unorm") return wgpu::TextureFormat::BC5RGUnorm;
+            if (s == "bc5-rg-snorm") return wgpu::TextureFormat::BC5RGSnorm;
+            if (s == "bc6h-rgb-ufloat") return wgpu::TextureFormat::BC6HRGBUfloat;
+            if (s == "bc6h-rgb-float") return wgpu::TextureFormat::BC6HRGBFloat;
+            if (s == "bc7-rgba-unorm") return wgpu::TextureFormat::BC7RGBAUnorm;
+            if (s == "bc7-rgba-unorm-srgb") return wgpu::TextureFormat::BC7RGBAUnormSrgb;
             return wgpu::TextureFormat::RGBA8Unorm;
         }
 
@@ -426,6 +444,20 @@ namespace lite::webgpu
             case wgpu::TextureFormat::RG8Unorm: return "rg8unorm";
             case wgpu::TextureFormat::RGBA16Float: return "rgba16float";
             case wgpu::TextureFormat::RGBA32Float: return "rgba32float";
+            case wgpu::TextureFormat::BC1RGBAUnorm: return "bc1-rgba-unorm";
+            case wgpu::TextureFormat::BC1RGBAUnormSrgb: return "bc1-rgba-unorm-srgb";
+            case wgpu::TextureFormat::BC2RGBAUnorm: return "bc2-rgba-unorm";
+            case wgpu::TextureFormat::BC2RGBAUnormSrgb: return "bc2-rgba-unorm-srgb";
+            case wgpu::TextureFormat::BC3RGBAUnorm: return "bc3-rgba-unorm";
+            case wgpu::TextureFormat::BC3RGBAUnormSrgb: return "bc3-rgba-unorm-srgb";
+            case wgpu::TextureFormat::BC4RUnorm: return "bc4-r-unorm";
+            case wgpu::TextureFormat::BC4RSnorm: return "bc4-r-snorm";
+            case wgpu::TextureFormat::BC5RGUnorm: return "bc5-rg-unorm";
+            case wgpu::TextureFormat::BC5RGSnorm: return "bc5-rg-snorm";
+            case wgpu::TextureFormat::BC6HRGBUfloat: return "bc6h-rgb-ufloat";
+            case wgpu::TextureFormat::BC6HRGBFloat: return "bc6h-rgb-float";
+            case wgpu::TextureFormat::BC7RGBAUnorm: return "bc7-rgba-unorm";
+            case wgpu::TextureFormat::BC7RGBAUnormSrgb: return "bc7-rgba-unorm-srgb";
             default: return "rgba8unorm";
             }
         }
