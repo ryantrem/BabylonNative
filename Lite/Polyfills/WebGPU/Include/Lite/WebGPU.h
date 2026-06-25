@@ -254,6 +254,9 @@ namespace lite::webgpu
         Napi::Value GetWidth(const Napi::CallbackInfo& info);
         Napi::Value GetHeight(const Napi::CallbackInfo& info);
         Napi::Value Close(const Napi::CallbackInfo& info);
+        // Returns the decoded RGBA8 pixels as a fresh Uint8ClampedArray (copy), for a JS
+        // 2D-canvas shim's getImageData(). Top-left origin, row-major, 4 bytes/pixel.
+        Napi::Value GetPixels(const Napi::CallbackInfo& info);
         uint32_t Width() const { return m_width; }
         uint32_t Height() const { return m_height; }
         const std::vector<uint8_t>& Pixels() const { return m_pixels; }

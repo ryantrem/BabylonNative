@@ -1017,7 +1017,15 @@ namespace lite::nativelite
                     std::string tag = info.Length() >= 1 && info[0].IsString()
                         ? info[0].As<Napi::String>().Utf8Value() : "";
                     if (tag == "canvas")
+                    {
+                        // Prefer the prelude's 2D-canvas factory (fetch+createImageBitmap-backed
+                        // drawImage/getImageData) so heightmap/texture-from-canvas paths work.
+                        // Fall back to the host WebGPU canvas if the factory isn't installed.
+                        Napi::Value factory = env.Global().Get("__lite2DCanvasFactory");
+                        if (factory.IsFunction())
+                            return factory.As<Napi::Function>().Call({});
                         return env.Global().Get("canvas");
+                    }
                     Napi::Object el = Napi::Object::New(env);
                     auto noop = Napi::Function::New(env,
                         [](const Napi::CallbackInfo& i) -> Napi::Value { return i.Env().Undefined(); });

@@ -2046,6 +2046,7 @@ namespace lite::webgpu
             Napi::ObjectWrap<ImageBitmap>::InstanceAccessor<&ImageBitmap::GetWidth>("width"),
             Napi::ObjectWrap<ImageBitmap>::InstanceAccessor<&ImageBitmap::GetHeight>("height"),
             Napi::ObjectWrap<ImageBitmap>::InstanceMethod<&ImageBitmap::Close>("close"),
+            Napi::ObjectWrap<ImageBitmap>::InstanceMethod<&ImageBitmap::GetPixels>("_getPixels"),
         });
     }
     // Constructed from an External<DecodedImage> smuggled by createImageBitmap (so the
@@ -2070,6 +2071,15 @@ namespace lite::webgpu
         m_pixels.clear();
         m_pixels.shrink_to_fit();
         return info.Env().Undefined();
+    }
+    Napi::Value ImageBitmap::GetPixels(const Napi::CallbackInfo& info)
+    {
+        Napi::Env env = info.Env();
+        // Hand JS a fresh Uint8ClampedArray copy of the RGBA8 pixels (ChakraCore's N-API
+        // doesn't alias external memory, so a copy is required anyway).
+        Napi::ArrayBuffer ab = Napi::ArrayBuffer::New(env, m_pixels.size());
+        if (!m_pixels.empty()) std::memcpy(ab.Data(), m_pixels.data(), m_pixels.size());
+        return Napi::Uint8Array::New(env, m_pixels.size(), ab, 0, napi_uint8_clamped_array);
     }
 
     // ======================================================================= Module

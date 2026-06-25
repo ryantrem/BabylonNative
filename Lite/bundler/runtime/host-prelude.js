@@ -129,4 +129,72 @@
         };
         g.__fetchRootPatched = true;
     }
+
+    // ---- Image + 2D canvas (heightmaps / texture-from-canvas) ----
+    // Some scenes load a PNG/JPEG via `new Image()` and read its pixels through a 2D canvas
+    // (createGroundFromHeightMap: drawImage + getImageData). The native host has no DOM 2D
+    // context, but it does have fetch + createImageBitmap (WIC decode). Implement Image and a
+    // minimal 2D canvas over those: Image.src fetches+decodes to an ImageBitmap; the 2D
+    // context's drawImage stashes that bitmap and getImageData returns its RGBA bytes (via the
+    // native ImageBitmap._getPixels()). Only the pixel-readback subset is supported (no actual
+    // 2D rasterization), which is all the heightmap path needs.
+    if (typeof g.Image === "undefined") {
+        g.Image = function Image() {
+            this.width = 0;
+            this.height = 0;
+            this.crossOrigin = null;
+            this.onload = null;
+            this.onerror = null;
+            this._bitmap = null;
+            const self = this;
+            Object.defineProperty(this, "src", {
+                configurable: true,
+                get() { return self._src; },
+                set(url) {
+                    self._src = url;
+                    Promise.resolve()
+                        .then(() => fetch(url))
+                        .then((r) => r.blob())
+                        .then((b) => createImageBitmap(b))
+                        .then((bmp) => {
+                            self._bitmap = bmp;
+                            self.width = bmp.width;
+                            self.height = bmp.height;
+                            if (typeof self.onload === "function") self.onload();
+                        })
+                        .catch((e) => {
+                            if (typeof self.onerror === "function") self.onerror(e);
+                        });
+                },
+            });
+        };
+    }
+
+    // Factory the native document.createElement("canvas") calls to get a 2D-capable canvas.
+    g.__lite2DCanvasFactory = function () {
+        const canvas = { width: 0, height: 0 };
+        let drawn = null; // the Image (or its bitmap) most recently drawn
+        canvas.getContext = function (type) {
+            if (type !== "2d") return null;
+            return {
+                canvas: canvas,
+                drawImage(img /*, dx, dy, ... */) {
+                    drawn = (img && img._bitmap) ? img._bitmap : img;
+                },
+                getImageData(_x, _y, w, h) {
+                    const bmp = drawn;
+                    if (bmp && typeof bmp._getPixels === "function") {
+                        return { data: bmp._getPixels(), width: bmp.width, height: bmp.height };
+                    }
+                    // No source drawn — return a zeroed buffer of the requested size.
+                    return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h };
+                },
+                fillRect() {},
+                clearRect() {},
+                putImageData() {},
+            };
+        };
+        canvas.toDataURL = function () { return ""; };
+        return canvas;
+    };
 })(typeof globalThis !== "undefined" ? globalThis : this);
