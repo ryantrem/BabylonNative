@@ -1,5 +1,55 @@
 # Native Babylon Lite — Architecture Plan (native render loop on Dawn)
 
+## ⚠️ ARCHITECTURE CLARIFICATION (2026-06-25) — two render paths; the scene corpus uses the JS one
+
+Investigating the per-draw perf gap surfaced a critical distinction that reframes every
+scene-corpus benchmark in this doc. The host (`NativeLite.cpp`) has **two** render-loop
+drivers, selected by how the scene bundle was built:
+
+1. **Native zero-JS path** (`RealRenderFrame` → walks `scene._frameGraph._tasks`, dispatches
+   by `task._kind`, `ExecuteForwardRenderTaskNative` issues draws in C++ by reading exposed
+   `binding._draw` DrawCommands + a cached opaque render-bundle). Runs **only** for bundles
+   that **externalize the render loop** so Lite's `renderFrame` is tree-shaken out
+   (the hand-built validation scenes: `box`/`multi`/`pbr`/`gltf`/`gltfenv` via
+   `bundler/scenes-lite/*.ts`). This is the project's core thesis — proven on a real
+   glTF+PBR+IBL scene — and it genuinely runs **zero Lite JS per frame**.
+
+2. **JS rAF path** (`requestAnimationFrame` pump, NativeLite.cpp ~line 1123). Real Lite's
+   `startEngine` calls `requestAnimationFrame(_renderFn)`; `_renderFn` runs Lite's **JS
+   `renderFrame`** (which records the whole frame — `setPipeline`/`setVertexBuffer`/
+   `setBindGroup`/`drawIndexed` per draw) **over the WebGPU N-API polyfill**; the host then
+   presents + times it. This is "config #2 / Model-B" — JS in the loop.
+
+**The entire canonical scene corpus (`dist/sceneN.lite.js`, built by `build-lite.mjs`) uses
+path #2.** Verified: every `dist/*.lite.js` (incl. `box`/`gltfenv`) still contains a
+`renderFrame` def + `requestAnimationFrame` refs, so `RealRenderFrame`/
+`ExecuteForwardRenderTaskNative` are **never called** for them (a drawdiag counter placed in
+that function never fired across 300 frames, while the bench still completed — proof the
+frame came from the rAF path).
+
+**Consequence for the perf numbers below:** the "native ~3–5× slower than browser above ~30
+draws" gap is **not** a native-render-loop cost — it is the **per-WebGPU-call N-API marshaling
+cost of running Lite's JS `renderFrame` over the polyfill**, frame after frame (each draw =
+~5 N-API calls × engine boundary crossings). Above ~30 draws this dominates. The native
+zero-JS path (#1) avoids it entirely but currently covers only the 5 validation scenes
+(it needs frame-graph generalization + `_draw` exposure for every material/task family —
+the `lite-codesign` work — to cover the broad corpus).
+
+**Two levers to close the heavy-scene gap, by path:**
+- **Path #2 (broad corpus, what scenes run today):** cut per-WebGPU-call N-API overhead —
+  the **V8 direct-binding / fast-call** idea (the `_mbV8Fast*` probes are already installed).
+  Batch or fast-path `setVertexBuffer`/`setBindGroup`/`drawIndexed`. Highest-leverage,
+  bounded-ish, benefits ALL config-#2 scenes.
+- **Path #1 (native loop):** extend coverage (generalize frame-graph task kinds + expose
+  `_draw` for PBR-shadow/geometry/post-process/transmission families + thin-instance/cull).
+  Bigger lift; each scene that converts drops to zero JS/frame.
+
+Heavy canonical scenes (`scene20` ~7502 draws, `scene24` 133 draws) currently stall in
+**setup** under the rAF bundle on the latest build (never reach steady-state render) — the
+`scene20` 12.5 ms / `scene24` 1.53 ms figures were captured earlier this session and reflect
+path #2 when those bundles built/ran. Re-validate setup before re-benchmarking heavy scenes.
+
+
 ## Benchmark results — consolidated (V8, `cubes.glb` = 8000 unique meshes → 8000 draws/frame)
 
 Metric: **render-loop CPU ms/frame** (present/GPU excluded). NO_VSYNC. `min` is the
