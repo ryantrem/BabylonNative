@@ -18,9 +18,13 @@ mkdirSync(outDir, { recursive: true });
 
 // The LOCAL Lite build entry (overridable via LITE_DIST env var). This is the package
 // we co-design; switch back to node_modules/@babylonjs/lite to use the published one.
+// As of the master rebuild, Lite emits an UNBUNDLED build/lib/ with one ESM module per
+// source module (1:1) plus `sideEffects:false`, so esbuild can tree-shake unused exports
+// (e.g. navigation/CSG/physics) instead of inheriting rollup's pre-merged dist chunk that
+// forced the recast/manifold WASM into every loadGltf bundle.
 const realLiteEntry = process.env.LITE_DIST
     ? process.env.LITE_DIST
-    : "D:\\Repos\\Babylon-Lite-3\\packages\\babylon-lite\\dist\\index.js";
+    : "D:\\Repos\\Babylon-Lite-3\\packages\\babylon-lite\\build\\lib\\index.js";
 
 // Pure-JS shims for web globals legacy ChakraCore lacks (TextEncoder/Decoder, etc.),
 // prepended to every bundle as a banner.
@@ -120,35 +124,7 @@ const aliasLiteOnly = {
     },
 };
 
-// Stub heavy, lazily-loaded WASM subsystems that the native host can't run anyway.
-// Lite code-splits these behind dynamic `import()` (recast-navigation ≈ 2.3 MB of
-// Emscripten WASM for nav meshes; manifold ≈ 1.3 MB for CSG mesh ops), so in a browser
-// they're only fetched when a scene actually uses navigation / constructive solid
-// geometry. But our single-file IIFE bundle (esbuild `format:"iife"`) cannot code-split,
-// so esbuild INLINES every reachable dynamic-import target into the one output file —
-// baking ~3.5 MB of base64 WASM into every scene bundle even though nothing calls it
-// (and the Emscripten WASM glue doesn't run on the Dawn host regardless). Resolve those
-// chunks to an empty module: the dynamic `import()` still resolves (to `{}`), it just
-// never carries the payload. A scene that genuinely needs nav/CSG would get an undefined
-// at the call site — acceptable, since those subsystems don't function on the host today.
-// Net effect on the cubes corpus: 6.6 MB → ~3.1 MB before minify (≈1.7 MB minified),
-// with identical rendering. Set LITE_KEEP_HEAVY_WASM=1 to disable this stub.
-const stubHeavyWasm = {
-    name: "stub-heavy-wasm",
-    setup(b) {
-        b.onResolve({ filter: /(recast-navigation|manifold)/ }, (args) => ({
-            path: args.path, namespace: "stub-heavy-wasm",
-        }));
-        b.onLoad({ filter: /.*/, namespace: "stub-heavy-wasm" }, () => ({
-            contents: "export default {};", loader: "js",
-        }));
-    },
-};
-
 const activePlugins = [aliasLiteOnly, rawImport, lowerBigIntLiterals];
-if (!process.env.LITE_KEEP_HEAVY_WASM) {
-    activePlugins.unshift(stubHeavyWasm);
-}
 
 
 let __built = 0, __failed = 0;
