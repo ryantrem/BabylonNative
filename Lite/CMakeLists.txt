@@ -16,6 +16,37 @@ if(NOT WIN32)
     message(FATAL_ERROR "The Lite P0 milestone currently targets Win32 + D3D12 only.")
 endif()
 
+# --------------------------------------------------------------------------
+# Global size-reducing toolchain flags (Release). The bulk of LiteApp.exe is
+# statically-linked Dawn + Tint code, so the highest-leverage knobs are at the
+# compiler/linker level: whole-program optimization lets the linker delete the
+# vast cross-TU dead code (Dawn/Tint expose only a handful of reachable WebGPU
+# entry points; the rest is reachable through templates and gets pruned), and
+# /OPT:REF,ICF fold unused/duplicate sections. Mirrors the size discipline of
+# CedricGuillemet/webgpu-cross-platform-app. Disable with LITE_NO_SIZE_OPT.
+#   /Gy  : function-level linking (lets /OPT:REF drop unused functions)
+#   /Gw  : data COMDAT folding (lets /OPT:REF drop unused globals)
+#   /GL  : whole-program optimization (LTCG) — pairs with linker /LTCG
+#   /Zc:inline : strip unreferenced inline functions
+# Linker:
+#   /LTCG     : consume /GL bitcode for cross-TU optimization
+#   /OPT:REF  : remove unreferenced functions/data
+#   /OPT:ICF  : fold identical COMDATs (huge for templated Dawn/Tint code)
+#   /DEBUG:NONE /INCREMENTAL:NO : no PDB, no incremental padding
+if(MSVC AND NOT LITE_NO_SIZE_OPT)
+    add_compile_options(
+        "$<$<CONFIG:Release>:/Gy>"
+        "$<$<CONFIG:Release>:/Gw>"
+        "$<$<CONFIG:Release>:/GL>"
+        "$<$<CONFIG:Release>:/Zc:inline>")
+    add_link_options(
+        "$<$<CONFIG:Release>:/LTCG>"
+        "$<$<CONFIG:Release>:/OPT:REF>"
+        "$<$<CONFIG:Release>:/OPT:ICF>"
+        "$<$<CONFIG:Release>:/INCREMENTAL:NO>"
+        "$<$<CONFIG:Release>:/DEBUG:NONE>")
+endif()
+
 include(FetchContent)
 
 # --------------------------------------------------------------------------
@@ -49,6 +80,24 @@ set(DAWN_USE_WINDOWS_UI      OFF CACHE BOOL "" FORCE)
 set(DAWN_USE_BUILT_DXC       OFF CACHE BOOL "" FORCE)
 set(DAWN_ENABLE_SPIRV_VALIDATION OFF CACHE BOOL "" FORCE)
 
+# Load the FXC shader compiler (d3dcompiler_47.dll) from the OS (System32) instead
+# of requiring a 4.5 MB copy shipped next to the exe. With this ON, Dawn's
+# PlatformFunctions uses OpenSystemLibrary("d3dcompiler_47.dll") and its CMake skips
+# the copy-next-to-exe step, so the demo ships ZERO d3dcompiler DLL. Trade-off (per
+# Dawn's own comment): the OS-bundled FXC can be older and has had heap-corruption
+# bugs on un-patched older Windows; current Win10/11 ship a fine copy. Set
+# LITE_SHIP_FXC=1 to revert to bundling the SDK FXC beside the exe.
+if(NOT LITE_SHIP_FXC)
+    set(DAWN_FORCE_SYSTEM_COMPONENT_LOAD ON CACHE BOOL "" FORCE)
+endif()
+
+# Extra Dawn/Tint size knobs (default ON in some configs; force OFF — none are on the
+# WGSL->HLSL->D3D12 runtime path). Mirrors webgpu-cross-platform-app's size config.
+set(DAWN_BUILD_FUZZERS       OFF CACHE BOOL "" FORCE)
+set(DAWN_BUILD_PROTOBUF      OFF CACHE BOOL "" FORCE)
+set(DAWN_DXC_ENABLE_ASSERTS_IN_NDEBUG OFF CACHE BOOL "" FORCE)
+set(DAWN_ALWAYS_ASSERT       OFF CACHE BOOL "" FORCE)
+
 # Tint: D3D consumes HLSL, so only build the WGSL reader + HLSL writer.
 set(TINT_BUILD_CMD_TOOLS   OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_TESTS       OFF CACHE BOOL "" FORCE)
@@ -62,6 +111,14 @@ set(TINT_BUILD_GLSL_WRITER OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_GLSL_VALIDATOR OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_MSL_WRITER  OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_HLSL_WRITER ON  CACHE BOOL "" FORCE)
+# Additional Tint targets that default ON in some configs but aren't on the runtime
+# WGSL-reader -> HLSL-writer path; force OFF to shave .text.
+set(TINT_BUILD_IR_BINARY          OFF CACHE BOOL "" FORCE)
+set(TINT_BUILD_SYNTAX_TREE_WRITER OFF CACHE BOOL "" FORCE)
+set(TINT_ENABLE_IR_VALIDATION     OFF CACHE BOOL "" FORCE)
+set(TINT_BUILD_BENCHMARKS         OFF CACHE BOOL "" FORCE)
+set(TINT_BUILD_FUZZERS            OFF CACHE BOOL "" FORCE)
+set(TINT_ENABLE_BREAK_IN_DEBUGGER OFF CACHE BOOL "" FORCE)
 
 # Dawn pinned to the same commit Cedric Guillemet's webgpu-cross-platform-app
 # validated (Chrome 146). Bump deliberately, not casually — Dawn's API drifts.

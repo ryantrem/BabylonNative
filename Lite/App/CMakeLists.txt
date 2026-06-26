@@ -24,24 +24,26 @@ if(MSVC)
 endif()
 
 # Dawn's D3D backend loads the FXC shader compiler (d3dcompiler_47.dll) at device
-# creation. It must sit next to the executable: Dawn searches its runtime paths
-# (the exe directory) with full paths, then falls back to a bare LoadLibraryEx
-# whose LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR flag rejects a path-less name with
-# ERROR_INVALID_PARAMETER (87). Shipping the DLL beside the exe is the documented
-# Dawn deployment step. (DXC is force-disabled unless Dawn is built with
-# DAWN_USE_BUILT_DXC, so only FXC is needed here.) For production, prefer the
-# Windows SDK redist copy over the OS copy in System32.
-find_file(D3DCOMPILER_47_DLL
-    NAMES d3dcompiler_47.dll
-    PATHS "$ENV{SystemRoot}/System32"
-    NO_DEFAULT_PATH)
-if(D3DCOMPILER_47_DLL)
-    add_custom_command(TARGET LiteApp POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${D3DCOMPILER_47_DLL}" "$<TARGET_FILE_DIR:LiteApp>"
-        COMMENT "Copying d3dcompiler_47.dll next to LiteApp.exe")
-else()
-    message(WARNING "d3dcompiler_47.dll not found; LiteApp will fail to create a device until it is placed next to the executable.")
+# creation. By default (LITE_SHIP_FXC unset) the top-level CMake sets
+# DAWN_FORCE_SYSTEM_COMPONENT_LOAD=ON, so Dawn loads FXC from the OS (System32) and
+# NO DLL needs to ship beside the exe — saving ~4.5 MB. Only when LITE_SHIP_FXC is set
+# do we copy the SDK/OS FXC next to the exe (Dawn then uses the exe-dir copy; its bare
+# LoadLibraryEx with LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR otherwise rejects a path-less
+# name with ERROR_INVALID_PARAMETER (87)). Shipping the latest SDK FXC is preferable
+# for older Windows where the OS FXC has known heap-corruption bugs.
+if(LITE_SHIP_FXC)
+    find_file(D3DCOMPILER_47_DLL
+        NAMES d3dcompiler_47.dll
+        PATHS "$ENV{SystemRoot}/System32"
+        NO_DEFAULT_PATH)
+    if(D3DCOMPILER_47_DLL)
+        add_custom_command(TARGET LiteApp POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${D3DCOMPILER_47_DLL}" "$<TARGET_FILE_DIR:LiteApp>"
+            COMMENT "Copying d3dcompiler_47.dll next to LiteApp.exe")
+    else()
+        message(WARNING "d3dcompiler_47.dll not found; LiteApp will fail to create a device until it is placed next to the executable.")
+    endif()
 endif()
 
 # Copy any runtime DLLs LiteApp depends on (e.g. the V8 redist: v8.dll,
