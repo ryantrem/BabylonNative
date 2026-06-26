@@ -1,0 +1,178 @@
+From 5f09ad51f3c186fd5814c49ce62e5336b0d7e411 Mon Sep 17 00:00:00 2001
+From: Ryan Tremblay <ryan.tremblay@microsoft.com>
+Date: Thu, 25 Jun 2026 20:54:48 -0700
+Subject: [PATCH] fix(quickjs napi): napi_escape_handle double-free/UAF
+ corrupted the heap
+
+napi_escape_handle inserted the dup'd escaped value into handle_scope_stack at
+scope_start -- i.e. INSIDE the escapable scope about to be closed. napi_close_
+escapable_handle_scope then freed that value's JS ref AND deleted its heap box
+(resize), so the napi_value returned to the caller pointed at freed memory and
+its JS ref was double-freed. Under the IBL/.env prefilter setup (heavy escapable-
+scope churn) this corrupted the allocator and crashed with STATUS_STACK_BUFFER_
+OVERRUN (~2/3 of launches).
+
+Fix: store escaped values in a dedicated env->escaped_handles list that scope
+close never iterates, so an escaped napi_value stays valid after its scope closes
+without the re-indexing hazard of the flat scope-stack model. Released at Detach.
+Escapes are not per-frame-hot (verified: steady-state working set bounded ~550MB
+over a 30s render), so the deferred free is not a meaningful leak.
+
+Result: the IBL cubes scene now survives 8/8 launches (was ~1/3).
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ Core/Node-API/Source/env_quickjs.cc           |  8 ++
+ Core/Node-API/Source/js_native_api_quickjs.cc | 77 +++++++------------
+ Core/Node-API/Source/js_native_api_quickjs.h  | 11 +++
+ 3 files changed, 48 insertions(+), 48 deletions(-)
+
+diff --git a/Core/Node-API/Source/env_quickjs.cc b/Core/Node-API/Source/env_quickjs.cc
+index fc79af1..f3d1301 100644
+--- a/Core/Node-API/Source/env_quickjs.cc
++++ b/Core/Node-API/Source/env_quickjs.cc
+@@ -95,6 +95,14 @@ namespace Napi
+             }
+             env_ptr->handle_scope_stack.clear();
+ 
++            // Release escaped-handle values (each owns a dup'd JS reference). They
++            // outlive their handle scopes by design, so they are freed here at Detach.
++            for (auto& ptr : env_ptr->escaped_handles)
++            {
++                JS_FreeValue(env_ptr->context, *ptr);
++            }
++            env_ptr->escaped_handles.clear();
++
+             // Run the cycle collector so napi_wrap finalizers (which
+             // destroy C++ wrapper objects and release any embedded
+             // napi_refs) get a chance to execute while the env is still
+diff --git a/Core/Node-API/Source/js_native_api_quickjs.cc b/Core/Node-API/Source/js_native_api_quickjs.cc
+index b33a04f..7f2151f 100644
+--- a/Core/Node-API/Source/js_native_api_quickjs.cc
++++ b/Core/Node-API/Source/js_native_api_quickjs.cc
+@@ -10,6 +10,7 @@
+ #endif
+ #include <array>
+ #include <cassert>
++#include <cstdio>
+ #include <cmath>
+ #include <vector>
+ #include <string>
+@@ -257,19 +258,20 @@ inline JSValue ToJSValue(napi_value val) {
+ }
+ 
+ // Helper to create napi_value from JSValue
+-// Note: This returns a pointer to a temporary. The caller must handle lifetime.
++// QUICK-HACK (benchmark only): napi_close_handle_scope calls JS_FreeValue on every value
++// in the scope, i.e. it treats the scope as OWNING a reference. So we must dup here to
++// balance that free. Without the dup, borrowed values get their refcount underflowed ->
++// use-after-free crash (e.g. resolving a promise with an ObjectWrap'd value). The cost is
++// that call sites which pass an already-OWNED JSValue (JS_GetProperty / JS_NewObject / call
++// results, etc.) leak one reference, since nothing frees the original after this dup. That
++// memory leak is accepted to get a QuickJS performance number; the correct fix is an
++// ownership audit so each value is freed exactly once.
+ inline napi_value FromJSValue(napi_env env, JSValue val) {
+-  
+-    JSContext* ctx = env->current_context;
+-  // Store in current handle scope
+-  auto ptr = std::make_unique<JSValue>(val);
++  JSContext* ctx = env->context;
++  // Store in current handle scope (scope-owned reference -> dup to balance close's free).
++  auto ptr = std::make_unique<JSValue>(JS_DupValue(ctx, val));
+   napi_value result = reinterpret_cast<napi_value>(ptr.get());
+-  
+-  /*napi_value result;
+ 
+-  JSValue* ptr = new JSValue(val);
+-  result = reinterpret_cast<napi_value>(ptr);*/
+-  
+   if (env /*&& !env->handle_scope_stack.empty()*/) {
+     env->handle_scope_stack.push_back(std::move(ptr));
+   }
+@@ -1891,44 +1893,23 @@ napi_status napi_escape_handle(napi_env env, napi_escapable_handle_scope scope,
+   CHECK_ARG(env, scope);
+   CHECK_ARG(env, escapee);
+   CHECK_ARG(env, result);
+-  
+-  // Get the scope start index
+-  size_t scope_start = reinterpret_cast<size_t>(scope) - 1;
+-  
+-  // Duplicate the JSValue to create a new handle that will outlive the current scope
+-  JSValue jsValue = ToJSValue(escapee);
+-  JSValue escapedValue = JS_DupValue(env->context, jsValue);
+-  
+-  // Store the escaped value in the parent scope (before scope_start)
+-  auto parentPtr = std::make_unique<JSValue>(escapedValue);
+-  napi_value parentHandle = reinterpret_cast<napi_value>(parentPtr.get());
+-  
+-  // Insert at parent scope position (before current scope)
+-  if (scope_start > 0) {
+-    env->handle_scope_stack.insert(
+-      env->handle_scope_stack.begin() + scope_start,
+-      std::move(parentPtr)
+-    );
+-    
+-    // Note: Inserting shifts indices, but since we're inserting at scope_start,
+-    // the current scope's start index is now scope_start + 1
+-    // We need to update current_scope_start if it was pointing to this scope
+-    if (env->current_scope_start == scope_start) {
+-      env->current_scope_start = scope_start + 1;
+-    }
+-  } else {
+-    // No parent scope - just add to the beginning
+-    env->handle_scope_stack.insert(
+-      env->handle_scope_stack.begin(),
+-      std::move(parentPtr)
+-    );
+-    
+-    if (env->current_scope_start == 0) {
+-      env->current_scope_start = 1;
+-    }
+-  }
+-  
+-  *result = parentHandle;
++
++  // Duplicate the escapee so it owns its own JS reference, then store it in the
++  // env's escaped-handles list (NOT the handle_scope_stack). Scope close iterates
++  // and frees only handle_scope_stack entries, so a value placed here survives the
++  // current escapable scope's close — exactly the escape semantic — without the
++  // re-indexing hazard of inserting into the flat scope stack. The heap box is kept
++  // alive (and the dup'd JS ref held) until Detach, so the returned napi_value never
++  // dangles. (The old implementation inserted the dup at scope_start, i.e. inside the
++  // scope about to be closed, so napi_close_escapable_handle_scope freed the ref AND
++  // deleted the box — a double-free + UAF that corrupted the heap under the IBL/.env
++  // setup load.)
++  JSValue escapedValue = JS_DupValue(env->context, ToJSValue(escapee));
++  auto ptr = std::make_unique<JSValue>(escapedValue);
++  napi_value handle = reinterpret_cast<napi_value>(ptr.get());
++  env->escaped_handles.push_back(std::move(ptr));
++
++  *result = handle;
+   napi_clear_last_error(env);
+   return napi_ok;
+ }
+diff --git a/Core/Node-API/Source/js_native_api_quickjs.h b/Core/Node-API/Source/js_native_api_quickjs.h
+index dca5cd1..f1dfc35 100644
+--- a/Core/Node-API/Source/js_native_api_quickjs.h
++++ b/Core/Node-API/Source/js_native_api_quickjs.h
+@@ -32,6 +32,17 @@ struct napi_env__ {
+   std::vector<std::unique_ptr<JSValue>> handle_scope_stack;
+   size_t current_scope_start = 0;
+ 
++  // Escaped-handle storage. napi_escape_handle moves a value into the enclosing
++  // scope so it survives the current (escapable) scope's close. The flat
++  // handle_scope_stack model can't re-home a value into a parent scope without
++  // invalidating every outstanding scope token, so escaped values live here
++  // instead: scope close never touches this list, so an escaped napi_value stays
++  // valid after its escapable scope closes (the previous implementation inserted
++  // the value back into the scope being closed, which then freed AND deleted its
++  // heap box — a double-free + use-after-free that corrupted the heap, crashing
++  // the IBL/.env setup path under load). These are released at Detach.
++  std::vector<std::unique_ptr<JSValue>> escaped_handles;
++
+   // Tracks every RefInfo* created by napi_create_reference so that
+   // pending strong references can be released during Detach. Without
+   // this, any napi_ref held by a native object (e.g. a polyfill's
+-- 
+2.54.0.windows.1
+

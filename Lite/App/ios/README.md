@@ -61,8 +61,13 @@ missing. (Override sources via `LITE_IOS_*` env vars — see the script header.)
 
 The glTF loader calls `new URL(".", urlObject)`; the upstream URL polyfill at our pinned
 commit throws "A string was expected" on that. The fix lives in
-`patches/0001-url-polyfill-coerce-args-to-string.patch`. Clone JsRuntimeHost at the pinned
-commit, apply the patch, and point the build at it via `FETCHCONTENT_SOURCE_DIR_JSRUNTIMEHOST`:
+`patches/0001-url-polyfill-coerce-args-to-string.patch` (required for **both** engines). Clone
+JsRuntimeHost at the pinned commit, apply the patch, and point the build at it via
+`FETCHCONTENT_SOURCE_DIR_JSRUNTIMEHOST`:
+
+> **Using QuickJS instead of JavaScriptCore?** See `QUICKJS-IOS-HANDOFF.md` — it uses a
+> different (forked) JsRuntimeHost, adds `patches/0002-...` (a QuickJS-specific crash fix),
+> and passes `-DNAPI_JAVASCRIPT_ENGINE=QuickJS`. The steps below are the JavaScriptCore path.
 
 ```bash
 # one-time: prepare a patched JsRuntimeHost source tree
