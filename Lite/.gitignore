@@ -6,3 +6,6 @@ build/
 
 # Local capture artifacts
 *.png
+
+# QuickJS variant build output
+build-qjs/
