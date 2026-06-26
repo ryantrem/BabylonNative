@@ -67,6 +67,23 @@ target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_MAX_FRAME_BUFFERS=${BGFX_CON
 # Temporary disable uniform debug.
 target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_DEBUG_UNIFORM=0)
 
+# Raise the static/dynamic vertex- and index-buffer handle pools above bgfx's 4096
+# default. Draw-call-heavy scenes with many UNIQUE meshes (e.g. an 8000-cube glTF,
+# where every cube is its own mesh = one vertex buffer + one index buffer) otherwise
+# exhaust the 4096 pool and spam handle-allocation failures. A floor of 16384 covers
+# such scenes with headroom; CI/integrators may pass a larger -DBGFX_CONFIG_MAX_*_BUFFERS
+# but never a smaller one.
+foreach(_bgfxBufCap
+        BGFX_CONFIG_MAX_VERTEX_BUFFERS
+        BGFX_CONFIG_MAX_INDEX_BUFFERS
+        BGFX_CONFIG_MAX_DYNAMIC_VERTEX_BUFFERS
+        BGFX_CONFIG_MAX_DYNAMIC_INDEX_BUFFERS)
+    if(NOT ${_bgfxBufCap} OR ${_bgfxBufCap} LESS 16384)
+        set(${_bgfxBufCap} 16384)
+    endif()
+    target_compile_definitions(bgfx PRIVATE ${_bgfxBufCap}=${${_bgfxBufCap}})
+endforeach()
+
 if(GRAPHICS_API STREQUAL "D3D11")
     target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_DIRECT3D11=1)
 elseif(GRAPHICS_API STREQUAL "D3D12")
