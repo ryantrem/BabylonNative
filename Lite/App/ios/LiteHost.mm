@@ -118,8 +118,16 @@ namespace lite::ios
 
         Babylon::AppRuntime& runtime = *st.runtime;
         auto renderer = st.renderer;
+        // NOTE: sceneSource/sceneName are captured BY VALUE (moved into the lambda). They must
+        // outlive the lambda, which runs on the JS thread and reads them (Napi::String::New /
+        // napi_run_script) AFTER controllerPromise.set_value() below. set_value unblocks this
+        // (main) thread's get_future().get(), so StartLite returns and destroys its local
+        // sceneSource/sceneName while the lambda is still executing. Capturing by reference
+        // there is a use-after-free (SIGSEGV in napi_create_string_utf8 on device; the
+        // simulator merely got lucky with the race). The lambda owns its own copies instead.
         runtime.Dispatch([&runtime, renderer, windowHandle, widthPx, heightPx,
-                          &controllerPromise, &sceneSource, &sceneName](Napi::Env env) {
+                          &controllerPromise, sceneSource = std::move(sceneSource),
+                          sceneName = std::move(sceneName)](Napi::Env env) {
             Babylon::Polyfills::Console::Initialize(env,
                 [](const char* message, Babylon::Polyfills::Console::LogLevel level) {
                     const char* tag = level == Babylon::Polyfills::Console::LogLevel::Error ? "error"

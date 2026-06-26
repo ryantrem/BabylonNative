@@ -11,8 +11,14 @@ target_link_libraries(LiteNativeLite PUBLIC
     LiteRenderer
     LiteWebGPU
     AppRuntime
-    napi
-    Psapi) # GetProcessMemoryInfo (PeakWorkingSetSize) for the benchmark report
+    napi)
+
+# GetProcessMemoryInfo (PeakWorkingSetSize) for the benchmark report — Windows only.
+# On Apple the equivalent (mach task_info / getrusage) needs no extra link library; the
+# memory/CPU probes in NativeLite.cpp are already behind _WIN32 / __APPLE__ guards.
+if(WIN32)
+    target_link_libraries(LiteNativeLite PUBLIC Psapi)
+endif()
 
 # The Microbench probe is V8-specific (raw v8::FunctionTemplate + v8 fast API calls).
 # Only enable its body when building against V8; on other engines (Chakra/QuickJS) it

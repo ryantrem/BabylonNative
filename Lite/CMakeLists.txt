@@ -150,6 +150,23 @@ FetchContent_Declare(dawn
     GIT_SUBMODULES_RECURSE OFF)
 FetchContent_MakeAvailable(dawn)
 
+# Dawn bundles its native backend into a monolithic `webgpu_dawn` STATIC library whose
+# only sources are $<TARGET_OBJECTS:...> generator expressions (see Dawn's
+# src/cmake/BundleLibraries.cmake). The CMake **Xcode generator** cannot archive a static
+# library that has no real compiled source of its own — it silently skips producing
+# libwebgpu_dawn.a, so LiteApp's link fails with "no such file ... libwebgpu_dawn.a" even
+# though libwebgpu_dawn_objects.a built fine. Giving the target a single empty translation
+# unit makes Xcode emit the archive (and fold in the TARGET_OBJECTS). Apple-only: the
+# Ninja/MSVC generators used on Windows handle object-only static libs natively, so this
+# workaround must not touch the reference build.
+if(APPLE AND TARGET webgpu_dawn)
+    set(_lite_dawn_dummy "${CMAKE_CURRENT_BINARY_DIR}/webgpu_dawn_xcode_dummy.c")
+    if(NOT EXISTS "${_lite_dawn_dummy}")
+        file(WRITE "${_lite_dawn_dummy}" "// Empty TU so the Xcode generator archives webgpu_dawn's object libraries.\n")
+    endif()
+    target_sources(webgpu_dawn PRIVATE "${_lite_dawn_dummy}")
+endif()
+
 # --------------------------------------------------------------------------
 # JsRuntimeHost — the JS engine + N-API host that owns the JS thread. We use it
 # here to drive the native render loop from the JS thread's event loop (via

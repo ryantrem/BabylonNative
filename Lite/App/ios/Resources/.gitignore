@@ -1,0 +1,9 @@
+# Demo bundle resources are staged here at build time by stage-resources.sh
+# (scene.lite.js, cubes.glb, environmentSpecular.env, ...) and copied into the .app.
+# They are generated/downloaded artifacts, so ignore everything in this folder EXCEPT
+# the files we intentionally commit: brdf-lut.png (ships with the repo) and the
+# .gitkeep placeholder that keeps the otherwise-empty folder in git.
+*
+!.gitignore
+!.gitkeep
+!brdf-lut.png

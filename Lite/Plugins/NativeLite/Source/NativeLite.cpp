@@ -1099,8 +1099,14 @@ namespace lite::nativelite
         controller->height = height;
 
         auto ctx = std::make_shared<Context>();
+        // Forward ALL surface handles the host populated. On Windows that's hwnd/hinstance
+        // (D3D12); on Apple it's metalLayer (CAMetalLayer*). Dropping metalLayer here leaves
+        // the JS-facing WebGPU module with no presentable surface on iOS (both hwnd and
+        // metalLayer null), so GPUCanvasContext.configure/getCurrentTexture never bind a
+        // swapchain and nothing is presented — a black screen despite a live render loop.
         ctx->webgpu = std::make_unique<webgpu::Module>(env,
-            webgpu::WindowHandle{controller->window.hwnd, controller->window.hinstance});
+            webgpu::WindowHandle{controller->window.hwnd, controller->window.hinstance,
+                                 controller->window.metalLayer});
         controller->webgpu = ctx->webgpu.get(); // native real-Lite loop presents via the surface
 
         // Legacy ChakraCore lacks `globalThis`; real Lite (and the bundle preamble)

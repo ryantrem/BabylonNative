@@ -1,11 +1,11 @@
-# Build output for the standalone Lite milestone build.
+# Build output for the standalone Lite milestone build. Covers every generator-specific
+# out-of-source tree: build/ (default), build-qjs/ (QuickJS variant), build-ios/ &
+# build-sim/ (iOS device + Simulator Xcode projects), and any future build-<variant>/.
 build/
+build-*/
 
 # Transient build logs
 *.log
 
 # Local capture artifacts
 *.png
-
-# QuickJS variant build output
-build-qjs/
