@@ -28,6 +28,14 @@ async function main() {
 
     createDefaultCamera(scene);
 
+    // Orbit the camera around the model every frame so frame-rate smoothness is
+    // visually observable. ~0.4 rad/s, deltaMs-scaled (framerate-independent).
+    const camera = scene.camera;
+    const orbitSpeedRadPerMs = 0.0004;
+    scene._beforeRender.push((deltaMs) => {
+        camera.alpha += orbitSpeedRadPerMs * deltaMs;
+    });
+
     await registerScene(scene);
     console.log("cubesqjs: scene registered");
 
