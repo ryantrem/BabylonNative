@@ -1,0 +1,66 @@
+From 9621e1e61abd822f34ab91ca9441cf8fe6fb7d7e Mon Sep 17 00:00:00 2001
+From: Ryan Tremblay <ryan.tremblay@microsoft.com>
+Date: Fri, 26 Jun 2026 07:23:20 -0700
+Subject: [PATCH] fix(url polyfill): coerce URL/base args to string (accept URL
+ object as base)
+
+The URL constructor (and canParse) used info[0/1].As<Napi::String>(), which throws
+'A string was expected' when passed a non-string. Per the WHATWG URL spec both args
+are USVStrings -- stringified, not required to already be strings. Babylon Lite's
+new (unbundled) glTF loader derives an asset base via new URL('.', someUrlObject),
+passing a URL OBJECT as base, which crashed asset loading on the native host. Use
+ToString() (JS coercion -> the URL object's toString() returns its href), matching
+browser behavior. Also guard against null base.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ Polyfills/URL/Source/URL.cpp | 20 ++++++++++++++------
+ 1 file changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/Polyfills/URL/Source/URL.cpp b/Polyfills/URL/Source/URL.cpp
+index 55e1469..9db8679 100644
+--- a/Polyfills/URL/Source/URL.cpp
++++ b/Polyfills/URL/Source/URL.cpp
+@@ -433,12 +433,19 @@ namespace Babylon::Polyfills::Internal
+             throw Napi::TypeError::New(info.Env(), "Failed to construct 'URL': 1 argument required, but only 0 present.");
+         }
+ 
+-        std::string urlString = info[0].As<Napi::String>();
++        // Per the WHATWG URL spec, both arguments are USVStrings: the url and base are
++        // stringified, not required to already BE strings. So coerce with ToString()
++        // (which invokes the value's JS toString) rather than As<Napi::String>() (which
++        // throws "A string was expected" on a non-string). This matters because callers
++        // legitimately pass a URL OBJECT as the base ΓÇö e.g. `new URL(".", someUrlObject)`,
++        // which Babylon Lite's glTF loader does to derive an asset base URL. A URL object
++        // stringifies to its href, exactly as in browsers.
++        std::string urlString = info[0].ToString();
+         std::string baseString;
+ 
+-        if (info.Length() > 1 && !info[1].IsUndefined())
++        if (info.Length() > 1 && !info[1].IsUndefined() && !info[1].IsNull())
+         {
+-            baseString = info[1].As<Napi::String>();
++            baseString = info[1].ToString();
+         }
+ 
+         if (!ParseURL(urlString, baseString))
+@@ -659,12 +666,13 @@ namespace Babylon::Polyfills::Internal
+             return Napi::Boolean::New(info.Env(), false);
+         }
+ 
+-        std::string urlString = info[0].As<Napi::String>();
++        // USVString coercion (see the constructor) ΓÇö accept non-string args incl. URL objects.
++        std::string urlString = info[0].ToString();
+         std::string baseString;
+ 
+-        if (info.Length() > 1 && !info[1].IsUndefined())
++        if (info.Length() > 1 && !info[1].IsUndefined() && !info[1].IsNull())
+         {
+-            baseString = info[1].As<Napi::String>();
++            baseString = info[1].ToString();
+ 
+             // If base is provided, first check if base itself is valid
+             auto baseParts = TryParseURL(baseString);
+-- 
+2.54.0.windows.1
+
