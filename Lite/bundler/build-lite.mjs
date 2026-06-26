@@ -6,7 +6,7 @@
 // Edit→build loop: edit Lite src → (in Babylon-Lite-3) pnpm --filter babylon-lite build
 // → here: node build-lite.mjs.
 
-import { build } from "esbuild";
+import { build, transform } from "esbuild";
 import { readdirSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -37,8 +37,29 @@ const publicRootDir = process.env.LITE_PUBLIC_ROOT
     ? process.env.LITE_PUBLIC_ROOT
     : "D:\\Repos\\Babylon-Lite-3\\lab\\public";
 const publicRootUrl = "file:///" + publicRootDir.replace(/\\/g, "/").replace(/^\/+/, "");
-const hostPrelude =
+const hostPreludeRaw =
     `globalThis.__LITE_PUBLIC_ROOT = ${JSON.stringify(publicRootUrl)};\n` + hostPreludeBody;
+
+// esbuild inserts `banner` verbatim — it does NOT minify it — so the ~9 KB prelude would
+// otherwise ship unminified (~3% of the demo bundle). Pre-minify it here (unless disabled)
+// so the WHOLE shipped file, prelude included, is minimized. Falls back to the raw source if
+// minification is off or fails. The prelude must stay valid standalone (it runs before the
+// IIFE), so it's minified independently rather than folded into the bundle.
+let hostPrelude = hostPreludeRaw;
+if (!process.env.LITE_NO_MINIFY) {
+    try {
+        const out = await transform(hostPreludeRaw, {
+            loader: "js",
+            minify: true,
+            target: "es2017",
+            legalComments: "none",
+            charset: "utf8",
+        });
+        hostPrelude = out.code;
+    } catch (e) {
+        console.error(`prelude minify failed, shipping raw: ${e && e.message ? e.message : e}`);
+    }
+}
 
 // Vite-style `?raw` imports: Lite imports its WGSL shader sources as raw strings
 // (e.g. `import src from "./skybox.wgsl?raw"`). esbuild doesn't understand the `?raw`
@@ -139,6 +160,12 @@ for (const entry of entries) {
             target: "es2017", // legacy ChakraCore: lower optional-chaining/nullish-coalescing/etc.
             platform: "neutral",
             minify: !process.env.LITE_NO_MINIFY, // collapse the ~2 MB engine chunk; off via LITE_NO_MINIFY for debugging
+            // Keep multibyte string/shader literals raw instead of \u-escaping them (smaller).
+            charset: "utf8",
+            // Strip debugger statements always; strip console.* only when explicitly requested
+            // (LITE_DROP_CONSOLE) — by default the scenes' [js:*] status logs are kept, which the
+            // native hosts surface to stderr/NSLog and are useful during bring-up.
+            drop: process.env.LITE_DROP_CONSOLE ? ["debugger", "console"] : ["debugger"],
             outfile,
             legalComments: "none",
             logLevel: "warning",
