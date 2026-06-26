@@ -119,6 +119,7 @@ namespace lite
         {
             void* hwnd = nullptr;
             void* hinstance = nullptr;
+            void* metalLayer = nullptr;
         };
 
         Renderer() = default;

@@ -6,10 +6,16 @@
 #include <chrono>
 #include <vector>
 
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX // keep std::min/std::max usable (windows.h otherwise defines min/max macros)
 #include <windows.h> // PostMessageW (wake the main-thread pump to exit after a benchmark)
 #include <psapi.h>   // GetProcessMemoryInfo (PeakWorkingSetSize) for the benchmark report
+#elif defined(__APPLE__)
+#include <mach/mach.h>       // task_info (phys_footprint) for peak memory
+#include <sys/resource.h>    // getrusage (CPU time) for render_cpu_ms
+#include <cstdlib>           // std::exit
+#endif
 
 namespace lite::nativelite
 {
@@ -21,6 +27,7 @@ namespace lite::nativelite
         // 100 ns units.
         double ProcessCpuMillis()
         {
+#if defined(_WIN32)
             FILETIME creation{}, exit{}, kernel{}, user{};
             if (!::GetProcessTimes(::GetCurrentProcess(), &creation, &exit, &kernel, &user))
                 return 0.0;
@@ -29,16 +36,41 @@ namespace lite::nativelite
             };
             const uint64_t total100ns = toNs100(kernel) + toNs100(user);
             return static_cast<double>(total100ns) / 10000.0; // 100ns units -> ms
+#elif defined(__APPLE__)
+            // getrusage sums user+system CPU across the process (all threads via RUSAGE_SELF).
+            rusage ru{};
+            if (::getrusage(RUSAGE_SELF, &ru) != 0) return 0.0;
+            auto toMs = [](const timeval& tv) {
+                return static_cast<double>(tv.tv_sec) * 1000.0 + static_cast<double>(tv.tv_usec) / 1000.0;
+            };
+            return toMs(ru.ru_utime) + toMs(ru.ru_stime);
+#else
+            return 0.0;
+#endif
         }
 
         // Peak working set of the process, in bytes (Windows PeakWorkingSetSize).
         uint64_t PeakWorkingSetBytes()
         {
+#if defined(_WIN32)
             PROCESS_MEMORY_COUNTERS pmc{};
             pmc.cb = sizeof(pmc);
             if (!::GetProcessMemoryInfo(::GetCurrentProcess(), &pmc, sizeof(pmc)))
                 return 0;
             return static_cast<uint64_t>(pmc.PeakWorkingSetSize);
+#elif defined(__APPLE__)
+            // Mach has no "peak" footprint counter; report the current physical footprint
+            // (resident anonymous + compressed), which is the closest analogue to PeakWorkingSet
+            // and matches what Xcode's memory gauge shows.
+            task_vm_info_data_t info{};
+            mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+            if (::task_info(mach_task_self(), TASK_VM_INFO,
+                    reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS)
+                return 0;
+            return static_cast<uint64_t>(info.phys_footprint);
+#else
+            return 0;
+#endif
         }
     }
 
@@ -711,13 +743,20 @@ namespace lite::nativelite
             double renderCpuPerFrame = n ? renderCpuMs / n : 0.0;
             double memPeakMb = static_cast<double>(memPeakBytes) / (1024.0 * 1024.0);
             // Protocol BENCH line + our existing fields (cpu_* = present-excluded JS-thread).
+#if defined(_WIN32)
+            constexpr const char* kBackend = "D3D12";
+#elif defined(__APPLE__)
+            constexpr const char* kBackend = "Metal";
+#else
+            constexpr const char* kBackend = "Unknown";
+#endif
             std::fprintf(stdout,
-                "BENCH scene=%s loop=%s engine=%s backend=D3D12 frames=%zu "
+                "BENCH scene=%s loop=%s engine=%s backend=%s frames=%zu "
                 "wall_ms=%.3f render_cpu_ms=%.3f render_cpu_ms_per_frame=%.4f "
                 "mem_peak_bytes=%llu mem_peak_mb=%.1f avg_ms=%.4f p95_ms=%.4f "
                 "cpu_avg_ms=%.4f cpu_min_ms=%.4f cpu_max_ms=%.4f cpu_p95_ms=%.4f "
                 "wall_ms_per_frame=%.4f wall_fps=%.1f\n",
-                sceneLabel.c_str(), loopLabel.c_str(), benchEngine.c_str(), n,
+                sceneLabel.c_str(), loopLabel.c_str(), benchEngine.c_str(), kBackend, n,
                 wallMs, renderCpuMs, renderCpuPerFrame,
                 (unsigned long long)memPeakBytes, memPeakMb, avgMs, p95Ms,
                 avg, mn, mx, p95, wallPerFrame, wallFps);
@@ -727,8 +766,14 @@ namespace lite::nativelite
                 n, wallMs, renderCpuMs, renderCpuPerFrame, memPeakMb, avgMs, p95Ms);
             running = false;
             jsLoopRunning = false;
+#if defined(_WIN32)
             if (window.hwnd != nullptr)
                 ::PostMessageW(static_cast<HWND>(window.hwnd), WM_CLOSE, 0, 0);
+#else
+            // No Win32 message pump to wake; a finite benchmark run just exits the process
+            // so stdout (the BENCH line) is flushed for the harness.
+            std::exit(0);
+#endif
         }
     }
 
@@ -1065,7 +1110,7 @@ namespace lite::nativelite
 
         ctx->webgpu->InstallNavigatorGpu(env);
         // globalThis.createImageBitmap — decodes glTF/texture image bytes (PNG/JPEG) to an
-        // ImageBitmap via stb_image, for real Lite's texture loaders (paired with the Blob
+        // ImageBitmap via the Windows Imaging Component, for real Lite's texture loaders (paired with the Blob
         // polyfill + GPUQueue.copyExternalImageToTexture). Setup-only.
         ctx->webgpu->InstallCreateImageBitmap(env);
 

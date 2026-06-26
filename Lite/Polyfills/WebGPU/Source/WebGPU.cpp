@@ -8,14 +8,23 @@
 #include <string>
 #include <vector>
 
-// Image decode uses the Windows Imaging Component (WIC) — a built-in OS codec (PNG/JPEG/
-// BMP/GIF/TIFF/...), so no third-party image library is vendored. LiteApp is Windows-only
-// (Win32 host + Dawn D3D), so WIC is always available.
+// Image decode is OS-native (no third-party image library vendored): the Windows Imaging
+// Component (WIC) on Windows, ImageIO/CoreGraphics on Apple. Both are built-in OS codecs
+// (PNG/JPEG/BMP/GIF/TIFF/...). The Apple decoder lives in WebGPU_AppleImage.mm.
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <objbase.h>
 #include <wincodec.h>
 #include <wrl/client.h>
+#elif defined(__APPLE__)
+namespace lite::webgpu
+{
+    // Implemented in WebGPU_AppleImage.mm (ImageIO). Decodes encoded image bytes to RGBA8.
+    bool DecodeImageApple(const uint8_t* data, size_t size,
+        std::vector<uint8_t>& outRGBA, uint32_t& outWidth, uint32_t& outHeight);
+}
+#endif
 
 
 // WebGPU-over-N-API: parses WebGPU descriptors from JS into Dawn objects. The enum
@@ -202,6 +211,7 @@ namespace lite::webgpu
         // Component. WIC auto-detects the codec from the byte stream. Returns false on any
         // failure (logged). The WIC factory + per-thread COM init are created lazily on the
         // first call (this runs on the JS thread, which createImageBitmap is invoked from).
+#if defined(_WIN32)
         bool DecodeImageWIC(const uint8_t* data, size_t size,
             std::vector<uint8_t>& outRGBA, uint32_t& outWidth, uint32_t& outHeight)
         {
@@ -275,6 +285,23 @@ namespace lite::webgpu
             outHeight = h;
             return true;
         }
+#endif // _WIN32
+
+        // Platform-dispatched image decode. createImageBitmap calls this; the impl is WIC on
+        // Windows and ImageIO on Apple. Either way the result is tightly-packed RGBA8.
+        bool DecodeImage(const uint8_t* data, size_t size,
+            std::vector<uint8_t>& outRGBA, uint32_t& outWidth, uint32_t& outHeight)
+        {
+#if defined(_WIN32)
+            return DecodeImageWIC(data, size, outRGBA, outWidth, outHeight);
+#elif defined(__APPLE__)
+            return DecodeImageApple(data, size, outRGBA, outWidth, outHeight);
+#else
+            (void)data; (void)size; (void)outRGBA; (void)outWidth; (void)outHeight;
+            std::fprintf(stderr, "[image] no image decoder for this platform\n");
+            return false;
+#endif
+        }
 
 
         // --- Dawn instance / adapter / device / surface creation ---------------
@@ -282,19 +309,39 @@ namespace lite::webgpu
         // navigator.gpu. The instance is created once (Module ctor); the adapter and
         // device are requested when JS calls requestAdapter / requestDevice.
 
-        wgpu::Surface CreateSurfaceForWindow(const wgpu::Instance& instance, void* hwnd, void* hinstance)
-        {            wgpu::RequestAdapterOptions options{};
+        // Create the swapchain surface from the platform's native window/layer. On Windows
+        // that's an HWND; on Apple it's a CAMetalLayer*. The Module passes whichever handle
+        // the host populated (see WindowHandle).
+        wgpu::Surface CreateSurfaceForWindow(const wgpu::Instance& instance, void* hwnd, void* hinstance, void* metalLayer)
+        {
+#if defined(_WIN32)
+            (void)metalLayer;
             wgpu::SurfaceSourceWindowsHWND chained{};
             chained.hwnd = hwnd;
             chained.hinstance = hinstance;
             wgpu::SurfaceDescriptor desc{};
             desc.nextInChain = &chained;
             return instance.CreateSurface(&desc);
+#elif defined(__APPLE__)
+            (void)hwnd; (void)hinstance;
+            wgpu::SurfaceSourceMetalLayer chained{};
+            chained.layer = metalLayer;
+            wgpu::SurfaceDescriptor desc{};
+            desc.nextInChain = &chained;
+            return instance.CreateSurface(&desc);
+#else
+            (void)instance; (void)hwnd; (void)hinstance; (void)metalLayer;
+            return {};
+#endif
         }
 
         wgpu::Adapter RequestAdapterSync(const wgpu::Instance& instance)
         {            wgpu::RequestAdapterOptions options{};
+#if defined(_WIN32)
             options.backendType = wgpu::BackendType::D3D12;
+#elif defined(__APPLE__)
+            options.backendType = wgpu::BackendType::Metal;
+#endif
             options.powerPreference = wgpu::PowerPreference::HighPerformance;
             wgpu::Adapter adapter;
             wgpu::Future future = instance.RequestAdapter(
@@ -2187,9 +2234,10 @@ namespace lite::webgpu
         instanceDesc.requiredFeatures = &kTimedWaitAny;
         m_instance = wgpu::CreateInstance(&instanceDesc);
 
-        // The HWND-bound swapchain surface (configured later via GPUCanvasContext).
-        if (m_window.hwnd != nullptr)
-            m_surface = CreateSurfaceForWindow(m_instance, m_window.hwnd, m_window.hinstance);
+        // The native-window-bound swapchain surface (configured later via GPUCanvasContext).
+        // On Windows the host populates hwnd/hinstance; on Apple it populates metalLayer.
+        if (m_window.hwnd != nullptr || m_window.metalLayer != nullptr)
+            m_surface = CreateSurfaceForWindow(m_instance, m_window.hwnd, m_window.hinstance, m_window.metalLayer);
 
         // Threaded-submit experiment: move queue.Submit + surface.Present off the JS thread
         // onto a dedicated render thread (mirrors the browser's GPU-process split). The render
@@ -2621,7 +2669,7 @@ namespace lite::webgpu
     }
 
     // globalThis.createImageBitmap(source, options?) — decodes PNG/JPEG/etc. bytes to an
-    // ImageBitmap (RGBA8) via stb_image. `source` may be a Blob (native polyfill — read via
+    // ImageBitmap (RGBA8) via the Windows Imaging Component. `source` may be a Blob (native polyfill — read via
     // its async arrayBuffer()), an ArrayBuffer, or a TypedArray. Returns Promise<ImageBitmap>
     // per the web API. Decode options (premultiplyAlpha/colorSpaceConversion "none") match
     // raw RGBA decode, so they need no special handling here.
@@ -2632,7 +2680,7 @@ namespace lite::webgpu
         auto decodeAndResolve = [](Napi::Env env, const uint8_t* data, size_t size,
             Napi::Promise::Deferred deferred) {
             DecodedImage decoded;
-            if (!DecodeImageWIC(data, size, decoded.pixels, decoded.width, decoded.height))
+            if (!DecodeImage(data, size, decoded.pixels, decoded.width, decoded.height))
             {
                 deferred.Reject(Napi::Error::New(env, "createImageBitmap: failed to decode image").Value());
                 return;

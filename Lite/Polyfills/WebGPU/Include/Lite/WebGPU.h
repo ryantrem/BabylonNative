@@ -398,12 +398,14 @@ namespace lite::webgpu
         wgpu::Adapter m_adapter;
     };
 
-    // Native window handle for the swapchain surface (HWND-bound). Graphics-API-agnostic
-    // shape so the polyfill doesn't depend on the Renderer.
+    // Native window handle for the swapchain surface. Graphics-API-agnostic shape so the
+    // polyfill doesn't depend on the Renderer. On Windows the host populates hwnd/hinstance
+    // (HWND); on Apple it populates metalLayer (a CAMetalLayer*).
     struct WindowHandle
     {
         void* hwnd = nullptr;
         void* hinstance = nullptr;
+        void* metalLayer = nullptr;
     };
 
     // Owns the class constructors for one JS environment. Constructed once after the
@@ -430,7 +432,7 @@ namespace lite::webgpu
         Napi::Object CreateCanvas(Napi::Env env, uint32_t width, uint32_t height) const;
 
         // Installs the global `createImageBitmap(blob|ArrayBuffer|TypedArray, opts?)` which
-        // decodes PNG/JPEG bytes to an ImageBitmap (RGBA8) via stb_image. Returns a Promise
+        // decodes PNG/JPEG bytes to an ImageBitmap (RGBA8) via the Windows Imaging Component. Returns a Promise
         // per the web API. Real Lite's glTF/texture loaders call this at setup.
         void InstallCreateImageBitmap(Napi::Env env) const;
 

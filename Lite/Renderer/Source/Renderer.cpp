@@ -104,20 +104,37 @@ fn vs_main(@location(0) inPos : vec3<f32>) -> @builtin(position) vec4<f32> {
 }
 )";
 
-        wgpu::Surface CreateSurfaceForWindow(const wgpu::Instance& instance, void* hwnd, void* hinstance)
+        wgpu::Surface CreateSurfaceForWindow(const wgpu::Instance& instance, void* hwnd, void* hinstance, void* metalLayer)
         {
+#if defined(_WIN32)
+            (void)metalLayer;
             wgpu::SurfaceSourceWindowsHWND chained{};
             chained.hwnd = hwnd;
             chained.hinstance = hinstance;
             wgpu::SurfaceDescriptor desc{};
             desc.nextInChain = &chained;
             return instance.CreateSurface(&desc);
+#elif defined(__APPLE__)
+            (void)hwnd; (void)hinstance;
+            wgpu::SurfaceSourceMetalLayer chained{};
+            chained.layer = metalLayer;
+            wgpu::SurfaceDescriptor desc{};
+            desc.nextInChain = &chained;
+            return instance.CreateSurface(&desc);
+#else
+            (void)instance; (void)hwnd; (void)hinstance; (void)metalLayer;
+            return {};
+#endif
         }
 
         wgpu::Adapter RequestAdapter(const wgpu::Instance& instance)
         {
             wgpu::RequestAdapterOptions options{};
+#if defined(_WIN32)
             options.backendType = wgpu::BackendType::D3D12;
+#elif defined(__APPLE__)
+            options.backendType = wgpu::BackendType::Metal;
+#endif
             options.powerPreference = wgpu::PowerPreference::HighPerformance;
             wgpu::Adapter adapter;
             wgpu::Future future = instance.RequestAdapter(
@@ -220,7 +237,7 @@ fn vs_main(@location(0) inPos : vec3<f32>) -> @builtin(position) vec4<f32> {
         m_instance = wgpu::CreateInstance(&instanceDesc);
         if (m_instance == nullptr) { std::fprintf(stderr, "[renderer] CreateInstance failed\n"); return false; }
 
-        m_surface = CreateSurfaceForWindow(m_instance, window.hwnd, window.hinstance);
+        m_surface = CreateSurfaceForWindow(m_instance, window.hwnd, window.hinstance, window.metalLayer);
         if (m_surface == nullptr) { std::fprintf(stderr, "[renderer] CreateSurface failed\n"); return false; }
 
         m_adapter = RequestAdapter(m_instance);
@@ -331,8 +348,9 @@ fn vs_main(@location(0) inPos : vec3<f32>) -> @builtin(position) vec4<f32> {
 
         wgpu::AdapterInfo info{};
         m_adapter.GetInfo(&info);
-        std::fprintf(stderr, "[renderer] device ready — adapter: %.*s, backend D3D12, format %d, %ux%u (materials/textures/pipeline cache)\n",
+        std::fprintf(stderr, "[renderer] device ready — adapter: %.*s, backend %d, format %d, %ux%u (materials/textures/pipeline cache)\n",
             static_cast<int>(info.device.length), info.device.data,
+            static_cast<int>(info.backendType),
             static_cast<int>(m_format), m_width, m_height);
         return true;
     }

@@ -12,8 +12,11 @@ project(BabylonNativeLite LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(NOT WIN32)
-    message(FATAL_ERROR "The Lite P0 milestone currently targets Win32 + D3D12 only.")
+# Platform support: Win32 + D3D12 (the original P0 target) and iOS/macOS + Metal.
+if(APPLE)
+    enable_language(OBJCXX)
+elseif(NOT WIN32)
+    message(FATAL_ERROR "BabylonNativeLite currently targets Win32 (D3D12) and Apple (Metal) only.")
 endif()
 
 # --------------------------------------------------------------------------
@@ -59,13 +62,19 @@ include(FetchContent)
 # requiring a full gclient/depot_tools checkout. Requires python3 on PATH.
 set(DAWN_FETCH_DEPENDENCIES ON CACHE BOOL "" FORCE)
 
-# Backends: D3D12 only.
-set(DAWN_ENABLE_D3D11    OFF CACHE BOOL "" FORCE)
-set(DAWN_ENABLE_D3D12    ON  CACHE BOOL "" FORCE)
+# Backends: D3D12 on Windows, Metal on Apple. Everything else off.
+if(APPLE)
+    set(DAWN_ENABLE_D3D11    OFF CACHE BOOL "" FORCE)
+    set(DAWN_ENABLE_D3D12    OFF CACHE BOOL "" FORCE)
+    set(DAWN_ENABLE_METAL    ON  CACHE BOOL "" FORCE)
+else()
+    set(DAWN_ENABLE_D3D11    OFF CACHE BOOL "" FORCE)
+    set(DAWN_ENABLE_D3D12    ON  CACHE BOOL "" FORCE)
+    set(DAWN_ENABLE_METAL    OFF CACHE BOOL "" FORCE)
+endif()
 set(DAWN_ENABLE_VULKAN   OFF CACHE BOOL "" FORCE)
 set(DAWN_ENABLE_OPENGLES OFF CACHE BOOL "" FORCE)
 set(DAWN_ENABLE_DESKTOP_GL OFF CACHE BOOL "" FORCE)
-set(DAWN_ENABLE_METAL    OFF CACHE BOOL "" FORCE)
 set(DAWN_ENABLE_NULL     OFF CACHE BOOL "" FORCE)
 
 # Drop tooling/samples/tests we don't need.
@@ -87,7 +96,8 @@ set(DAWN_ENABLE_SPIRV_VALIDATION OFF CACHE BOOL "" FORCE)
 # Dawn's own comment): the OS-bundled FXC can be older and has had heap-corruption
 # bugs on un-patched older Windows; current Win10/11 ship a fine copy. Set
 # LITE_SHIP_FXC=1 to revert to bundling the SDK FXC beside the exe.
-if(NOT LITE_SHIP_FXC)
+# Windows/D3D only — Metal has no FXC equivalent (Tint emits MSL the OS compiles).
+if(WIN32 AND NOT LITE_SHIP_FXC)
     set(DAWN_FORCE_SYSTEM_COMPONENT_LOAD ON CACHE BOOL "" FORCE)
 endif()
 
@@ -98,7 +108,8 @@ set(DAWN_BUILD_PROTOBUF      OFF CACHE BOOL "" FORCE)
 set(DAWN_DXC_ENABLE_ASSERTS_IN_NDEBUG OFF CACHE BOOL "" FORCE)
 set(DAWN_ALWAYS_ASSERT       OFF CACHE BOOL "" FORCE)
 
-# Tint: D3D consumes HLSL, so only build the WGSL reader + HLSL writer.
+# Tint: emit the shader language the platform's GPU backend consumes — HLSL for D3D12,
+# MSL for Metal. Build only the WGSL reader + the one writer we need.
 set(TINT_BUILD_CMD_TOOLS   OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_TESTS       OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_DOCS        OFF CACHE BOOL "" FORCE)
@@ -109,8 +120,13 @@ set(TINT_BUILD_SPV_READER  OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_SPV_WRITER  OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_GLSL_WRITER OFF CACHE BOOL "" FORCE)
 set(TINT_BUILD_GLSL_VALIDATOR OFF CACHE BOOL "" FORCE)
-set(TINT_BUILD_MSL_WRITER  OFF CACHE BOOL "" FORCE)
-set(TINT_BUILD_HLSL_WRITER ON  CACHE BOOL "" FORCE)
+if(APPLE)
+    set(TINT_BUILD_MSL_WRITER  ON  CACHE BOOL "" FORCE)
+    set(TINT_BUILD_HLSL_WRITER OFF CACHE BOOL "" FORCE)
+else()
+    set(TINT_BUILD_MSL_WRITER  OFF CACHE BOOL "" FORCE)
+    set(TINT_BUILD_HLSL_WRITER ON  CACHE BOOL "" FORCE)
+endif()
 # Additional Tint targets that default ON in some configs but aren't on the runtime
 # WGSL-reader -> HLSL-writer path; force OFF to shave .text.
 set(TINT_BUILD_IR_BINARY          OFF CACHE BOOL "" FORCE)
@@ -151,7 +167,18 @@ FetchContent_MakeAvailable(dawn)
 # command line (e.g. -DNAPI_JAVASCRIPT_ENGINE=V8) to benchmark a different JS engine.
 # V8 on Windows is pulled from NuGet by JsRuntimeHost (v8-v143-<arch> + redist DLLs,
 # auto-copied next to the exe via $<TARGET_RUNTIME_DLLS:LiteApp> in App/CMakeLists.txt).
-set(NAPI_JAVASCRIPT_ENGINE "Chakra" CACHE STRING "JavaScript engine for Node-API (Chakra or V8)")
+# Default JS engine per platform: Chakra on Windows (system Chakra.dll, zero-download),
+# JavaScriptCore on Apple (the iOS/macOS system framework — no JIT entitlement needed,
+# App-Store-legal, and already a first-class Node-API engine in JsRuntimeHost). Override
+# from the command line (e.g. -DNAPI_JAVASCRIPT_ENGINE=V8) where supported. V8 on Windows
+# is pulled from NuGet by JsRuntimeHost (v8-v143-<arch> + redist DLLs, auto-copied next to
+# the exe via $<TARGET_RUNTIME_DLLS:LiteApp> in App/CMakeLists.txt). V8 is NOT an option on
+# iOS (JIT is prohibited).
+if(APPLE)
+    set(NAPI_JAVASCRIPT_ENGINE "JavaScriptCore" CACHE STRING "JavaScript engine for Node-API")
+else()
+    set(NAPI_JAVASCRIPT_ENGINE "Chakra" CACHE STRING "JavaScript engine for Node-API (Chakra or V8)")
+endif()
 set(JSRUNTIMEHOST_TESTS OFF CACHE BOOL "" FORCE)
 # ScriptLoader hard-depends on UrlLib (only fetched with the network polyfills),
 # so disable it; we run the startup JS snippet via the core napi_run_script API.
@@ -183,9 +210,13 @@ FetchContent_MakeAvailable(JsRuntimeHost)
 #                       ObjectWrap classes over the same Dawn objects
 #   Plugins/NativeLite— the Babylon Lite native engine plugin: Engine ObjectWrap
 #                       + the BabylonNativeLite surface (createEngine/startEngine)
-#   App               — the Win32 host executable
+#   App               — the host executable: Win32 (App/) or iOS UIKit (App/ios/)
 # --------------------------------------------------------------------------
 add_subdirectory(Renderer)
 add_subdirectory(Polyfills/WebGPU)
 add_subdirectory(Plugins/NativeLite)
-add_subdirectory(App)
+if(APPLE)
+    add_subdirectory(App/ios)
+else()
+    add_subdirectory(App)
+endif()
