@@ -75,14 +75,22 @@ namespace lite::nativelite
         bool noVsync = false;                   // uncap present mode for a real speed measurement
         std::string loopLabel = "native";
         std::string sceneLabel = "scene";
+        // JS engine label for the BENCH line (protocol field engine=). Defaults to the engine
+        // this host was compiled against; overridable via LITE_BENCH_ENGINE.
+#if defined(LITE_ENGINE_V8)
+        std::string benchEngine = "V8";
+#else
+        std::string benchEngine = "QuickJS";
+#endif
 
-        // Records one rendered frame's render-loop CPU time (milliseconds — the cost of the
-        // per-frame render work itself, EXCLUDING vsync/present wait) and, once benchFrames
-        // samples are gathered, emits the BENCH line + requests exit. This isolates the
-        // variable under test (render-loop language) independent of display refresh, so it's
-        // directly comparable across native loop / in-app JS loop / browser. Called at the
-        // end of every frame by whichever pump is active.
-        void RecordFrameAndMaybeFinish(double frameCpuMs);
+        // Records one rendered frame's render-loop CPU time (frameCpuMs — the present-excluded
+        // cost of the per-frame render work) and per-frame wall time (frameWallMs — record +
+        // present), and, once benchFrames samples are gathered, emits the BENCH line + requests
+        // exit. The BENCH line follows the shared NativeLite benchmark protocol: render_cpu_ms
+        // (process CPU kernel+user across the loop), mem_peak_bytes (PeakWorkingSetSize),
+        // wall_ms (total), avg_ms/p95_ms (per-frame wall). Called at the end of every frame by
+        // whichever pump is active.
+        void RecordFrameAndMaybeFinish(double frameCpuMs, double frameWallMs);
 
         // Called from the app (main) thread to stop the loop and release Dawn on the
         // JS thread before the window/HWND is destroyed.

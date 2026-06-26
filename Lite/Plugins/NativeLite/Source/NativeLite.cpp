@@ -9,9 +9,39 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX // keep std::min/std::max usable (windows.h otherwise defines min/max macros)
 #include <windows.h> // PostMessageW (wake the main-thread pump to exit after a benchmark)
+#include <psapi.h>   // GetProcessMemoryInfo (PeakWorkingSetSize) for the benchmark report
 
 namespace lite::nativelite
 {
+    namespace
+    {
+        // Process CPU time (kernel + user, summed across ALL threads), in milliseconds.
+        // Used by the benchmark to report render_cpu_ms = the process CPU consumed strictly
+        // across the render loop (delta of two reads). GetProcessTimes returns FILETIMEs in
+        // 100 ns units.
+        double ProcessCpuMillis()
+        {
+            FILETIME creation{}, exit{}, kernel{}, user{};
+            if (!::GetProcessTimes(::GetCurrentProcess(), &creation, &exit, &kernel, &user))
+                return 0.0;
+            auto toNs100 = [](const FILETIME& ft) {
+                return (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+            };
+            const uint64_t total100ns = toNs100(kernel) + toNs100(user);
+            return static_cast<double>(total100ns) / 10000.0; // 100ns units -> ms
+        }
+
+        // Peak working set of the process, in bytes (Windows PeakWorkingSetSize).
+        uint64_t PeakWorkingSetBytes()
+        {
+            PROCESS_MEMORY_COUNTERS pmc{};
+            pmc.cb = sizeof(pmc);
+            if (!::GetProcessMemoryInfo(::GetCurrentProcess(), &pmc, sizeof(pmc)))
+                return 0;
+            return static_cast<uint64_t>(pmc.PeakWorkingSetSize);
+        }
+    }
+
     namespace
     {
         // Env-lifetime context shared by the BabylonNativeLite closures. Holds the
@@ -568,7 +598,7 @@ namespace lite::nativelite
             int n = controller->frameCounter.fetch_add(1);
             if (n % 120 == 0)
                 std::fprintf(stderr, "[nativelite] native draw frame %d (zero JS, data-driven)\n", n);
-            controller->RecordFrameAndMaybeFinish(cpuMs);
+            controller->RecordFrameAndMaybeFinish(cpuMs, cpuMs);
         }
 
 
@@ -622,14 +652,16 @@ namespace lite::nativelite
     // at a time). Receives each frame's render-loop CPU time (ms, present excluded); after
     // benchFrames samples (the first is dropped as warm-up) prints the BENCH line + posts
     // WM_CLOSE to exit.
-    void Controller::RecordFrameAndMaybeFinish(double frameCpuMs)
+    void Controller::RecordFrameAndMaybeFinish(double frameCpuMs, double frameWallMs)
     {
         if (benchFrames == 0) return; // benchmarking disabled
 
         static bool s_done = false;
         static bool s_droppedWarmup = false;
-        static std::vector<double> s_samples;
+        static std::vector<double> s_samples;     // present-excluded JS-thread CPU per frame
+        static std::vector<double> s_wallSamples; // per-frame wall (record + present)
         static std::chrono::steady_clock::time_point s_wallStart; // wall clock at first sample
+        static double s_procCpuStartMs = 0.0;     // process CPU (kernel+user) at first sample
         if (s_done) return;
 
         if (!s_droppedWarmup)
@@ -638,23 +670,30 @@ namespace lite::nativelite
         }
         else if (s_samples.size() < benchFrames)
         {
-            if (s_samples.capacity() == 0) s_samples.reserve(benchFrames);
-            if (s_samples.empty()) s_wallStart = std::chrono::steady_clock::now(); // start wall timer
+            if (s_samples.capacity() == 0) { s_samples.reserve(benchFrames); s_wallSamples.reserve(benchFrames); }
+            if (s_samples.empty())
+            {
+                s_wallStart = std::chrono::steady_clock::now(); // start wall timer
+                s_procCpuStartMs = ProcessCpuMillis();          // process CPU at loop start
+            }
             s_samples.push_back(frameCpuMs);
+            s_wallSamples.push_back(frameWallMs);
         }
 
         if (s_samples.size() >= benchFrames)
         {
             s_done = true;
+            // Process CPU consumed strictly across the render loop (kernel+user, all threads).
+            double renderCpuMs = ProcessCpuMillis() - s_procCpuStartMs;
+            uint64_t memPeakBytes = PeakWorkingSetBytes();
             // Wall-clock throughput across the whole measured window: total elapsed real time
-            // from the first to the last sample, divided by frame count. This is the HONEST
-            // end-to-end metric (includes submit, present, and any blocking) — i.e. "absolute
-            // FPS with no vsync", which the per-frame CPU number (present-excluded, JS-thread
-            // only) does not capture. wall_ms = real ms/frame; wall_fps = 1000 / wall_ms.
+            // from the first to the last sample. wall_ms (total) includes submit/present/blocking.
             double wallMs = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - s_wallStart).count();
             std::vector<double> sorted = s_samples;
             std::sort(sorted.begin(), sorted.end());
+            std::vector<double> wallSorted = s_wallSamples;
+            std::sort(wallSorted.begin(), wallSorted.end());
             double sum = 0.0;
             for (double v : s_samples) sum += v;
             const size_t n = s_samples.size();
@@ -664,12 +703,28 @@ namespace lite::nativelite
             double p95 = sorted[std::min(n - 1, static_cast<size_t>(n * 0.95))];
             double wallPerFrame = n ? wallMs / n : 0.0;
             double wallFps = wallPerFrame > 0.0 ? 1000.0 / wallPerFrame : 0.0;
+            // Per-frame WALL time stats (protocol avg_ms / p95_ms).
+            double wallSum = 0.0;
+            for (double v : s_wallSamples) wallSum += v;
+            double avgMs = n ? wallSum / n : 0.0;
+            double p95Ms = wallSorted[std::min(n - 1, static_cast<size_t>(n * 0.95))];
+            double renderCpuPerFrame = n ? renderCpuMs / n : 0.0;
+            double memPeakMb = static_cast<double>(memPeakBytes) / (1024.0 * 1024.0);
+            // Protocol BENCH line + our existing fields (cpu_* = present-excluded JS-thread).
             std::fprintf(stdout,
-                "BENCH scene=%s loop=%s frames=%zu cpu_avg_ms=%.4f cpu_min_ms=%.4f cpu_max_ms=%.4f cpu_p95_ms=%.4f wall_ms_per_frame=%.4f wall_fps=%.1f\n",
-                sceneLabel.c_str(), loopLabel.c_str(), n, avg, mn, mx, p95, wallPerFrame, wallFps);
+                "BENCH scene=%s loop=%s engine=%s backend=D3D12 frames=%zu "
+                "wall_ms=%.3f render_cpu_ms=%.3f render_cpu_ms_per_frame=%.4f "
+                "mem_peak_bytes=%llu mem_peak_mb=%.1f avg_ms=%.4f p95_ms=%.4f "
+                "cpu_avg_ms=%.4f cpu_min_ms=%.4f cpu_max_ms=%.4f cpu_p95_ms=%.4f "
+                "wall_ms_per_frame=%.4f wall_fps=%.1f\n",
+                sceneLabel.c_str(), loopLabel.c_str(), benchEngine.c_str(), n,
+                wallMs, renderCpuMs, renderCpuPerFrame,
+                (unsigned long long)memPeakBytes, memPeakMb, avgMs, p95Ms,
+                avg, mn, mx, p95, wallPerFrame, wallFps);
             std::fflush(stdout);
-            std::fprintf(stderr, "[nativelite] benchmark complete (%zu frames, render-loop CPU avg %.4f ms, wall %.4f ms/frame = %.1f fps)\n",
-                n, avg, wallPerFrame, wallFps);
+            std::fprintf(stderr, "[nativelite] benchmark complete (%zu frames) — wall %.1f ms, "
+                "render_cpu %.1f ms (%.3f ms/frame), mem_peak %.1f MB, avg %.3f ms, p95 %.3f ms\n",
+                n, wallMs, renderCpuMs, renderCpuPerFrame, memPeakMb, avgMs, p95Ms);
             running = false;
             jsLoopRunning = false;
             if (window.hwnd != nullptr)
@@ -1157,7 +1212,7 @@ namespace lite::nativelite
                             }
                             s_prevFrameEnd = frameEnd;
                         }
-                        controller->RecordFrameAndMaybeFinish(cpuMs);
+                        controller->RecordFrameAndMaybeFinish(cpuMs, fullFrameMs);
                     });
                     return Napi::Number::New(env, id);
                 },

@@ -11,13 +11,16 @@ target_link_libraries(LiteNativeLite PUBLIC
     LiteRenderer
     LiteWebGPU
     AppRuntime
-    napi)
+    napi
+    Psapi) # GetProcessMemoryInfo (PeakWorkingSetSize) for the benchmark report
 
 # The Microbench probe is V8-specific (raw v8::FunctionTemplate + v8 fast API calls).
 # Only enable its body when building against V8; on other engines (Chakra/QuickJS) it
 # compiles to a no-op InstallMicrobench so the V8-only headers are never included.
+# PUBLIC so the engine-conditional default in NativeLite.h (Controller::benchEngine)
+# agrees across all TUs that include the header.
 if(NAPI_JAVASCRIPT_ENGINE STREQUAL "V8")
-    target_compile_definitions(LiteNativeLite PRIVATE LITE_ENGINE_V8=1)
+    target_compile_definitions(LiteNativeLite PUBLIC LITE_ENGINE_V8=1)
 endif()
 
 if(MSVC)

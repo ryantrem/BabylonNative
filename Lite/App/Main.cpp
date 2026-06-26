@@ -79,9 +79,16 @@ int main()
     std::string startupSource = startup.first;
     std::string startupName = startup.second;
 
+    // Window size: default 1280x720, overridable via LITE_WIDTH / LITE_HEIGHT (the shared
+    // NativeLite benchmark protocol renders at 640x400 to keep GPU pressure low).
+    int winWidth = kInitialWidth;
+    int winHeight = kInitialHeight;
+    if (const char* w = std::getenv("LITE_WIDTH")) { int v = std::atoi(w); if (v > 0) winWidth = v; }
+    if (const char* h = std::getenv("LITE_HEIGHT")) { int v = std::atoi(h); if (v > 0) winHeight = v; }
+
     // 1. Window (main thread owns it and its message pump).
     lite::Window window;
-    if (!window.Create(kInitialWidth, kInitialHeight, "Babylon Native Lite"))
+    if (!window.Create(winWidth, winHeight, "Babylon Native Lite"))
     {
         std::fprintf(stderr, "[lite] window creation failed\n");
         return 1;
@@ -92,8 +99,8 @@ int main()
     window.GetClientSize(fbWidth, fbHeight);
     if (fbWidth <= 0 || fbHeight <= 0)
     {
-        fbWidth = kInitialWidth;
-        fbHeight = kInitialHeight;
+        fbWidth = winWidth;
+        fbHeight = winHeight;
     }
 
     auto renderer = std::make_shared<lite::Renderer>();
@@ -164,6 +171,10 @@ int main()
         if (const char* ll = std::getenv("LITE_LOOP_LABEL"))
         {
             ctrl->loopLabel = ll;
+        }
+        if (const char* be = std::getenv("LITE_BENCH_ENGINE"))
+        {
+            ctrl->benchEngine = be;
         }
         ctrl->sceneLabel = startupName;
         {
