@@ -119,7 +119,37 @@ const aliasLiteOnly = {
         b.onResolve({ filter: /^(babylon-lite|@babylonjs\/lite)$/ }, () => ({ path: realLiteEntry }));
     },
 };
+
+// Stub heavy, lazily-loaded WASM subsystems that the native host can't run anyway.
+// Lite code-splits these behind dynamic `import()` (recast-navigation ≈ 2.3 MB of
+// Emscripten WASM for nav meshes; manifold ≈ 1.3 MB for CSG mesh ops), so in a browser
+// they're only fetched when a scene actually uses navigation / constructive solid
+// geometry. But our single-file IIFE bundle (esbuild `format:"iife"`) cannot code-split,
+// so esbuild INLINES every reachable dynamic-import target into the one output file —
+// baking ~3.5 MB of base64 WASM into every scene bundle even though nothing calls it
+// (and the Emscripten WASM glue doesn't run on the Dawn host regardless). Resolve those
+// chunks to an empty module: the dynamic `import()` still resolves (to `{}`), it just
+// never carries the payload. A scene that genuinely needs nav/CSG would get an undefined
+// at the call site — acceptable, since those subsystems don't function on the host today.
+// Net effect on the cubes corpus: 6.6 MB → ~3.1 MB before minify (≈1.7 MB minified),
+// with identical rendering. Set LITE_KEEP_HEAVY_WASM=1 to disable this stub.
+const stubHeavyWasm = {
+    name: "stub-heavy-wasm",
+    setup(b) {
+        b.onResolve({ filter: /(recast-navigation|manifold)/ }, (args) => ({
+            path: args.path, namespace: "stub-heavy-wasm",
+        }));
+        b.onLoad({ filter: /.*/, namespace: "stub-heavy-wasm" }, () => ({
+            contents: "export default {};", loader: "js",
+        }));
+    },
+};
+
 const activePlugins = [aliasLiteOnly, rawImport, lowerBigIntLiterals];
+if (!process.env.LITE_KEEP_HEAVY_WASM) {
+    activePlugins.unshift(stubHeavyWasm);
+}
+
 
 let __built = 0, __failed = 0;
 for (const entry of entries) {
@@ -132,6 +162,7 @@ for (const entry of entries) {
             format: "iife",
             target: "es2017", // legacy ChakraCore: lower optional-chaining/nullish-coalescing/etc.
             platform: "neutral",
+            minify: !process.env.LITE_NO_MINIFY, // collapse the ~2 MB engine chunk; off via LITE_NO_MINIFY for debugging
             outfile,
             legalComments: "none",
             logLevel: "warning",
