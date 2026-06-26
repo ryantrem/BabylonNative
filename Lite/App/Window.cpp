@@ -133,6 +133,14 @@ namespace lite
         }
     }
 
+    void Window::StartTick(unsigned int intervalMs)
+    {
+        if (m_hwnd != nullptr)
+        {
+            ::SetTimer(static_cast<HWND>(m_hwnd), 1, intervalMs, nullptr);
+        }
+    }
+
     long long __stdcall Window::WndProcThunk(void* hwnd, unsigned int msg, unsigned long long wParam, long long lParam)
     {
         Window* self = nullptr;
@@ -179,6 +187,12 @@ namespace lite
                 if (wParam == VK_ESCAPE)
                 {
                     m_shouldClose = true;
+                }
+                return 0;
+            case WM_TIMER:
+                if (m_tickCb)
+                {
+                    m_tickCb();
                 }
                 return 0;
             default:

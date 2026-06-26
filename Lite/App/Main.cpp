@@ -15,6 +15,7 @@
 #define _CRT_SECURE_NO_WARNINGS // std::getenv is fine for reading an optional scene path
 
 #include "Window.h"
+#include "Overlay.h"
 
 #include <Lite/NativeLite.h>
 #include <Lite/Renderer.h>
@@ -27,6 +28,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cwchar>
 #include <fstream>
 #include <future>
 #include <memory>
@@ -200,6 +202,29 @@ int main()
     });
 
     controller = controllerPromise.get_future().get();
+
+    // 3b. On-screen HUD overlay showing live FPS + frame time. Default on; opt out with
+    //     LITE_HUD=0, and auto-off in benchmark mode (the window closes immediately).
+    lite::Overlay overlay;
+    bool hudEnabled = controller->benchFrames == 0;
+    if (const char* h = std::getenv("LITE_HUD"))
+    {
+        hudEnabled = !(h[0] == '0' || h[0] == 'f' || h[0] == 'F');
+    }
+    if (hudEnabled && overlay.Create(window.Hwnd(), window.Hinstance()))
+    {
+        window.SetTickCallback([&overlay, &controller]() {
+            double fps = controller->hudFps.load(std::memory_order_relaxed);
+            double frameMs = controller->hudFrameMs.load(std::memory_order_relaxed);
+            double cpuMs = controller->hudCpuMs.load(std::memory_order_relaxed);
+            wchar_t buf[160];
+            std::swprintf(buf, sizeof(buf) / sizeof(buf[0]),
+                L"FPS:  %6.1f\nFrame: %6.2f ms\nCPU:   %6.2f ms",
+                fps, frameMs, cpuMs);
+            overlay.Update(buf);
+        });
+        window.StartTick(250); // refresh 4x/second
+    }
 
     // 4. Main-thread message pump. Rendering happens on the JS thread, so the main
     //    thread blocks on window messages instead of spinning.

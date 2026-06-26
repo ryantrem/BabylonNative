@@ -48,6 +48,18 @@ namespace lite::nativelite
         bool realMode = false;                  // true once real-Lite startEngine ran
         std::atomic<int> frameCounter{0};
 
+        // ---- Live render stats for the on-screen HUD overlay ----
+        // Written on the JS thread at the end of each frame (rAF pump), read on the main
+        // (window) thread by the overlay timer. Atomics make the cross-thread read safe.
+        // wallMs/fps are an EMA of the real frame-to-frame cadence (the cadence the user
+        // observes); cpuMs is the EMA of the JS-thread render-loop CPU (present-excluded).
+        std::atomic<double> hudFrameMs{0.0};
+        std::atomic<double> hudFps{0.0};
+        std::atomic<double> hudCpuMs{0.0};
+        // Records one frame's wall cadence (ms since the previous frame) + JS-thread CPU ms
+        // into the HUD EMAs. Called once per frame by the rAF pump.
+        void RecordHudStats(double wallMs, double cpuMs);
+
         // ---- Benchmark harness ----
         // When benchFrames > 0, the render loop measures per-frame wall time and, after
         // collecting benchFrames samples (a warm-up frame is dropped), prints a machine-

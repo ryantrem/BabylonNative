@@ -3,7 +3,8 @@
 # polyfill used for JS logging.
 add_executable(LiteApp
     Main.cpp
-    Window.cpp)
+    Window.cpp
+    Overlay.cpp)
 
 target_link_libraries(LiteApp PRIVATE
     LiteNativeLite

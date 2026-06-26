@@ -677,6 +677,22 @@ namespace lite::nativelite
         }
     }
 
+    // Folds one frame's wall cadence + JS-thread CPU time into the HUD EMAs. An
+    // exponential moving average (alpha 0.1) smooths the per-frame jitter into a steady,
+    // readable number while still tracking changes within a few frames. Allocation-free;
+    // safe to call every frame on the JS thread.
+    void Controller::RecordHudStats(double wallMs, double cpuMs)
+    {
+        constexpr double kAlpha = 0.1;
+        double prevMs = hudFrameMs.load(std::memory_order_relaxed);
+        double emaMs = prevMs > 0.0 ? prevMs * (1.0 - kAlpha) + wallMs * kAlpha : wallMs;
+        double prevCpu = hudCpuMs.load(std::memory_order_relaxed);
+        double emaCpu = prevCpu > 0.0 ? prevCpu * (1.0 - kAlpha) + cpuMs * kAlpha : cpuMs;
+        hudFrameMs.store(emaMs, std::memory_order_relaxed);
+        hudCpuMs.store(emaCpu, std::memory_order_relaxed);
+        hudFps.store(emaMs > 0.0 ? 1000.0 / emaMs : 0.0, std::memory_order_relaxed);
+    }
+
     void Controller::RequestShutdownAndWait()
     {
         running = false;
@@ -1116,6 +1132,21 @@ namespace lite::nativelite
                         if (controller->webgpu != nullptr)
                             const_cast<webgpu::Module*>(controller->webgpu)->Present();
                         controller->frameCounter.fetch_add(1);
+                        // HUD: wall cadence = real time since the previous frame completed
+                        // (the cadence the user observes — includes present/blocking), folded
+                        // into an EMA for the on-screen overlay. cpuMs is the present-excluded
+                        // JS-thread render-loop time.
+                        {
+                            static std::chrono::steady_clock::time_point s_prevFrameEnd{};
+                            auto nowTp = std::chrono::steady_clock::now();
+                            if (s_prevFrameEnd.time_since_epoch().count() != 0)
+                            {
+                                double wallMs = std::chrono::duration<double, std::milli>(
+                                    nowTp - s_prevFrameEnd).count();
+                                controller->RecordHudStats(wallMs, cpuMs);
+                            }
+                            s_prevFrameEnd = nowTp;
+                        }
                         controller->RecordFrameAndMaybeFinish(cpuMs);
                     });
                     return Napi::Number::New(env, id);
