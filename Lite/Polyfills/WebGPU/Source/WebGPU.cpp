@@ -93,6 +93,13 @@ namespace lite::webgpu
             ProfSlot slot;
             std::chrono::steady_clock::time_point t0;
             explicit ScopedProf(ProfSlot s) : slot(s), t0(std::chrono::steady_clock::now()) {}
+            ~ScopedProf()
+            {
+                if (!g_prof.enabled) return;
+                double ns = std::chrono::duration<double, std::nano>(
+                    std::chrono::steady_clock::now() - t0).count();
+                g_prof.add(slot, ns);
+            }
         };
 
         // ---- GPU resource-allocation profiler (LITE_MEM_PROFILE=1) -----------------
