@@ -167,6 +167,12 @@ int main()
         if (ctrl->webgpu != nullptr)
         {
             ctrl->webgpu->SetNoVsync(ctrl->noVsync);
+            // Headless benchmark mode: render offscreen, no compositor present (LITE_HEADLESS=1).
+            if (const char* hl = std::getenv("LITE_HEADLESS"))
+            {
+                if (hl[0] == '1' || hl[0] == 't' || hl[0] == 'T')
+                    ctrl->webgpu->SetHeadless(true);
+            }
         }
         if (const char* ll = std::getenv("LITE_LOOP_LABEL"))
         {

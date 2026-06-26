@@ -445,6 +445,10 @@ namespace lite::webgpu
             uint32_t width, uint32_t height);
         void Present();
 
+        // Blocks until the GPU finishes all submitted work. Used by the headless benchmark
+        // path in place of surface.Present() to give each frame a real GPU-completion boundary.
+        void WaitForGpuIdle();
+
         // Debug ground-truth: copies the about-to-be-presented surface texture back to the
         // CPU and logs the center pixel + a coarse histogram to stderr. Guarded by env
         // LITE_READBACK=<frameNumber> (logs once when the present counter reaches it).
@@ -481,6 +485,16 @@ namespace lite::webgpu
         // instead of Fifo, so a benchmark measures real GPU/CPU cost rather than the display
         // refresh. Set before the surface is configured.
         void SetNoVsync(bool noVsync) { m_noVsync = noVsync; }
+
+        // Headless benchmark mode: render into a persistent OFFSCREEN color texture instead of
+        // the swapchain, and replace surface.Present() with a per-frame GPU-completion wait.
+        // This removes the desktop compositor's present back-pressure (which otherwise dominates
+        // windowed wall-clock timings and varies wildly with focus/occlusion), giving a
+        // reproducible "time to render" that reflects only CPU record/submit + GPU execute —
+        // matching the reference benchmark's --no-window mode. Set before the surface configures.
+        void SetHeadless(bool headless) { m_headless = headless; }
+        bool Headless() const { return m_headless; }
+        const wgpu::Texture& OffscreenColor() const { return m_offscreenColor; }
 
         Napi::Object CreateDevice(Napi::Env env, const wgpu::Device& device) const;
         Napi::Object WrapAdapter(Napi::Env env, const wgpu::Adapter& adapter) const;
@@ -556,6 +570,8 @@ namespace lite::webgpu
         wgpu::TextureFormat m_surfaceFormat{};
         bool m_surfaceConfigured = false;
         bool m_noVsync = false;
+        bool m_headless = false;          // render offscreen, no surface present (benchmark)
+        wgpu::Texture m_offscreenColor;   // persistent offscreen render target (headless mode)
         wgpu::Device m_surfaceDevice;    // device the surface was configured with (for readback)
         bool m_surfaceCanCopySrc = false; // CopySrc added to surface usage (caps permitting)
         int m_presentCount = 0;          // presents issued; drives LITE_READBACK frame trigger

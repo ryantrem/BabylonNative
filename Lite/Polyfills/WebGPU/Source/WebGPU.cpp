@@ -1990,6 +1990,20 @@ namespace lite::webgpu
         // First swapchain acquire = the render loop has begun (setup is done). Arm threaded
         // submit deferral here so all setup submits ran synchronously and stayed valid.
         const_cast<Module*>(mod)->MarkRenderLoopStarted();
+        // Headless: return the persistent offscreen texture (no surface acquire). It's reused
+        // every frame; the per-frame GPU-completion wait in Present() makes the overwrite safe.
+        if (mod->Headless())
+        {
+            wgpu::Texture offscreen = mod->OffscreenColor();
+            if (offscreen == nullptr)
+            {
+                Napi::Error::New(env, "getCurrentTexture: headless offscreen target not configured")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+            const_cast<Module*>(mod)->NoteAcquiredTexture(offscreen);
+            return mod->WrapTexture(env, offscreen);
+        }
         wgpu::SurfaceTexture surfaceTexture{};
         mod->Surface().GetCurrentTexture(&surfaceTexture);
         if (surfaceTexture.texture == nullptr)
@@ -2201,7 +2215,7 @@ namespace lite::webgpu
     void Module::ConfigureSurface(const wgpu::Device& device, wgpu::TextureFormat format,
         uint32_t width, uint32_t height)
     {
-        if (m_surface == nullptr || width == 0 || height == 0) return;
+        if (width == 0 || height == 0) return;
         m_surfaceFormat = format;
         m_surfaceDevice = device;
         if (m_readbackFrame < 0)
@@ -2209,6 +2223,30 @@ namespace lite::webgpu
             if (const char* rb = std::getenv("LITE_READBACK"))
                 m_readbackFrame = std::atoi(rb);
         }
+
+        // Headless benchmark mode: render into a persistent offscreen color texture instead of
+        // configuring/presenting the swapchain. getCurrentTexture returns this texture every
+        // frame (it's the MSAA resolve target Lite renders into) and Present() does a GPU
+        // completion wait instead of surface.Present() — so no compositor back-pressure.
+        if (m_headless)
+        {
+            wgpu::TextureDescriptor td{};
+            td.size = {width, height, 1};
+            td.format = format;
+            td.dimension = wgpu::TextureDimension::e2D;
+            td.mipLevelCount = 1;
+            td.sampleCount = 1;
+            // RenderAttachment: it's the resolve target. CopySrc: lets LITE_READBACK verify it.
+            td.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc;
+            m_offscreenColor = device.CreateTexture(&td);
+            m_surfaceCanCopySrc = true;
+            m_surfaceConfigured = true;
+            std::fprintf(stderr, "[nativelite] headless: offscreen %ux%u render target (no surface present)\n",
+                width, height);
+            return;
+        }
+
+        if (m_surface == nullptr) return;
         wgpu::SurfaceConfiguration config{};
         config.device = device;
         config.format = format;
@@ -2281,7 +2319,15 @@ namespace lite::webgpu
             }
             {
                 ScopedProf _p(P_present);
-                if (m_surfaceConfigured && m_surface != nullptr)
+                if (m_headless)
+                {
+                    // Headless: submit is now issued (drained above); wait for the GPU to
+                    // finish executing this frame, then skip the surface present entirely.
+                    WaitForGpuIdle();
+                    if (m_readbackFrame >= 0 && ++m_presentCount == m_readbackFrame)
+                        ReadbackAndLog("headless");
+                }
+                else if (m_surfaceConfigured && m_surface != nullptr)
                 {
                     if (m_readbackFrame >= 0 && ++m_presentCount == m_readbackFrame)
                         ReadbackAndLog("threaded");
@@ -2295,7 +2341,13 @@ namespace lite::webgpu
 
         {
             ScopedProf _p(P_present);
-            if (m_surfaceConfigured && m_surface != nullptr)
+            if (m_headless)
+            {
+                WaitForGpuIdle();
+                if (m_readbackFrame >= 0 && ++m_presentCount == m_readbackFrame)
+                    ReadbackAndLog("headless");
+            }
+            else if (m_surfaceConfigured && m_surface != nullptr)
             {
                 if (m_readbackFrame >= 0 && ++m_presentCount == m_readbackFrame)
                     ReadbackAndLog("direct");
@@ -2307,6 +2359,21 @@ namespace lite::webgpu
         // One-shot GPU-allocation dump shortly after load (frame 10) so all setup buffers
         // are counted but we don't spam every frame.
         if (g_mem.enabled) { static uint64_t s_memFrame = 0; if (++s_memFrame == 10) g_mem.dump("post-load"); }
+    }
+
+    // Blocks until the GPU has finished all work submitted to the queue so far. Used by the
+    // headless benchmark path in place of surface.Present(): without a swapchain to pace the
+    // loop, this gives each frame a real GPU-completion boundary (so wall time reflects actual
+    // render work and the JS thread doesn't race ahead queuing unbounded frames). Uses the same
+    // OnSubmittedWorkDone + WaitAny mechanism as the adapter/device/readback sync points.
+    void Module::WaitForGpuIdle()
+    {
+        if (m_surfaceDevice == nullptr) return;
+        wgpu::Queue queue = m_surfaceDevice.GetQueue();
+        wgpu::Future f = queue.OnSubmittedWorkDone(
+            wgpu::CallbackMode::WaitAnyOnly,
+            [](wgpu::QueueWorkDoneStatus, wgpu::StringView) {});
+        m_instance.WaitAny(f, UINT64_MAX);
     }
 
     void Module::ReadbackAndLog(const char* label)
