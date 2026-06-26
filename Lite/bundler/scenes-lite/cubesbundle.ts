@@ -41,6 +41,17 @@ async function main() {
 
     createDefaultCamera(scene);
 
+    // Orbit the camera around the model every frame so frame-rate smoothness is
+    // visually observable. `scene._beforeRender` callbacks run once per frame in
+    // Lite's JS render loop and receive the frame delta in ms; `alpha` is the
+    // ArcRotateCamera's rotation around the Y axis. ~0.4 rad/s (a full revolution
+    // every ~16 s), framerate-independent via deltaMs.
+    const camera = scene.camera;
+    const orbitSpeedRadPerMs = 0.0004;
+    scene._beforeRender.push((deltaMs) => {
+        camera.alpha += orbitSpeedRadPerMs * deltaMs;
+    });
+
     // No setForceNoOpaqueBundle — Lite builds + caches the opaque render bundle at setup.
     await registerScene(scene);
     console.log("cubesbundle: scene registered");
