@@ -56,9 +56,14 @@ namespace lite::nativelite
         std::atomic<double> hudFrameMs{0.0};
         std::atomic<double> hudFps{0.0};
         std::atomic<double> hudCpuMs{0.0};
-        // Records one frame's wall cadence (ms since the previous frame) + JS-thread CPU ms
-        // into the HUD EMAs. Called once per frame by the rAF pump.
-        void RecordHudStats(double wallMs, double cpuMs);
+        // Records the HUD EMAs for one frame:
+        //   fullFrameMs — the full frame WORK time: Lite renderFrame (record) + Present
+        //                 (submit drain + present), i.e. the real end-to-end cost of producing
+        //                 the frame, EXCLUDING the inter-frame vsync idle wait.
+        //   cpuMs       — the JS-thread render-loop CPU (Lite renderFrame only; present-excluded).
+        //   cadenceMs   — real time since the previous frame completed (includes vsync idle);
+        //                 drives the observed FPS the user actually sees.
+        void RecordHudStats(double fullFrameMs, double cpuMs, double cadenceMs);
 
         // ---- Benchmark harness ----
         // When benchFrames > 0, the render loop measures per-frame wall time and, after
