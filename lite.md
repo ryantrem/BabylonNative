@@ -49,6 +49,51 @@ Heavy canonical scenes (`scene20` ~7502 draws, `scene24` 133 draws) currently st
 `scene20` 12.5 ms / `scene24` 1.53 ms figures were captured earlier this session and reflect
 path #2 when those bundles built/ran. Re-validate setup before re-benchmarking heavy scenes.
 
+## IN-FRAME PROFILE (2026-06-25) — localized the wall-clock gap to present/submit serialization
+
+Fixed a real bug first: `ScopedProf` (the `LITE_GPU_PROFILE=1` per-call profiler) captured a
+start time in its ctor but had **no destructor**, so it recorded nothing → the profiler always
+dumped zeros. Added the destructor; the profiler now works.
+
+Profile of `cubesbundle.lite.js` (8000 cubes, path #2 = Lite JS `renderFrame` over the polyfill,
+threaded-submit default, 300 frames, NO_VSYNC):
+
+| slot | ms/frame | calls/frame |
+|---|---:|---:|
+| **submit** | **~3.0** | 2.0 |
+| present | 0.33 | 1.0 |
+| beginRenderPass | 0.07 | 1.0 |
+| executeBundles | 0.007 | 1.0 |
+| setBindGroup / finish / endPass / createView / getCurrentTexture / createCommandEncoder | <0.013 each | |
+| **instrumented SUM** | ~3.6 | |
+
+Bench: JS-thread render-loop **CPU avg 2.32 ms**, **wall 5.44 ms/frame (184 fps)**.
+
+Findings (definitive):
+1. **The record/binding layer is NOT the bottleneck — ~0.1 ms/frame total.** All 8000 draws
+   replay through a single `executeBundles` in **0.007 ms**; `beginRenderPass` (0.07 ms) is the
+   biggest record slot. This re-confirms the microbench: the JS↔native boundary / per-draw N-API
+   cost is irrelevant here. (Lite builds its own opaque render-bundle once and replays it.)
+2. **`submit` dominates at ~3 ms.** The "2.0 calls/frame" = (a) the JS-thread `Queue::Submit`
+   *enqueue* (fast; hands buffers to the render thread, returns) + (b) the **render-thread actual
+   `wgpu::Queue::Submit`** (`RenderThreadMain`, WebGPU.cpp ~line 2449) where Dawn→D3D12 command-
+   list generation happens. (b) is the ~3 ms and correctly runs OFF the JS-thread CPU metric
+   (hence CPU 2.32 < SUM 3.6).
+3. **Wall-clock bottleneck = serialization in `Present()`.** `Module::Present()` (JS thread)
+   **blocks on `m_drainCv.wait(... m_pendingSubmits == 0 ...)`** (WebGPU.cpp ~line 2278) — it
+   waits for THIS frame's submit to finish before presenting its backbuffer. So submit can't
+   overlap with the next frame's record. Wall 5.44 ms ≈ record/CPU 2.3 + wait-for-submit ~3 +
+   present 0.3 — exactly the measured number.
+
+**Localized optimization (next):** present **one frame behind** (frames-in-flight ≥ 2). Present
+frame N−1's already-completed submit immediately and only ensure frame N's submit is enqueued —
+never block the JS thread on the current frame's submit. That overlaps submit(N) with
+record(N+1), dropping wall from ~5.4 ms toward `max(record+present, submit) ≈ ~3 ms`
+(~330 fps). Correctness care: a swapchain backbuffer can't be presented until its own submit
+completes, so this needs decoupled acquire/present + a ≥2-deep swapchain (the "deeper
+pipelining" headroom flagged in the threaded-submit writeup). This is the real remaining
+wall-clock lever for the polyfill path; the binding layer is a dead end (proven twice).
+
 
 ## Benchmark results — consolidated (V8, `cubes.glb` = 8000 unique meshes → 8000 draws/frame)
 
