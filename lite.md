@@ -94,6 +94,33 @@ completes, so this needs decoupled acquire/present + a ≥2-deep swapchain (the 
 pipelining" headroom flagged in the threaded-submit writeup). This is the real remaining
 wall-clock lever for the polyfill path; the binding layer is a dead end (proven twice).
 
+### Why the present-1-behind lever is STRUCTURALLY BLOCKED under "unmodified Lite"
+
+Traced the pipelining and it does not fit the current constraints:
+- `record(N+1)` is just CPU command-list *encoding* — it does NOT touch the GPU, so it is safe to
+  overlap with the render thread's `submit(N)` (GPU execution is serialized by the queue anyway).
+  So in principle submit(N) ‖ record(N+1) is the win.
+- BUT the swapchain enforces a **strict 1:1 `getCurrentTexture` → `Present` pairing** (violating it
+  produced "GetCurrentTexture was not called prior to Present" errors — see threaded-submit notes).
+  So `getCurrentTexture(N+1)` (which `record(N+1)` needs as its render target) cannot run until
+  `Present(N)`, which needs `submit(N)` done. The acquire-after-present rule serializes the chain.
+- Breaking it requires **double-buffering Lite's single offscreen MSAA render target** (so
+  `record(N+1)` writes RT-B while `submit(N)` reads RT-A) + a ≥2-deep decoupled-acquire swapchain.
+  Lite reuses ONE offscreen RT (`_config.rt`) every frame; the polyfill can't silently swap it
+  without breaking Lite's own references. Double-buffering it is a **Lite-side co-design change** —
+  **off the table** now that the direction is "run unmodified Lite, polyfill only."
+
+**Conclusion — the polyfill path is already near its structural floor.** Profiling shows: record
+≈ 0.1 ms (negligible), submit ≈ 3 ms correctly off the JS-thread CPU metric, 184 fps on 8000 MSAA
+cubes. Threaded-submit already delivers the **real-app** win — it frees the JS thread during the
+3 ms submit for game logic / the next frame's JS (the actual goal); the benchmark wall-clock
+(5.44 ms) understates this because the bench has no other JS work to overlap. The remaining
+benchmark-only wall-clock gap is structural (single in-flight frame, 1:1 acquire/present, single
+offscreen RT) and only closable by frame-in-flight pipelining that needs Lite co-design (off the
+table) or a risky deeper-swapchain experiment. **Recommendation: accept current perf (it's good)
+unless a specific real-app workload shows a wall-clock problem; the binding-layer and
+record-layer levers are both proven dead ends.**
+
 
 ## Benchmark results — consolidated (V8, `cubes.glb` = 8000 unique meshes → 8000 draws/frame)
 
