@@ -733,6 +733,18 @@ namespace lite::nativelite
             double mn = sorted.front();
             double mx = sorted.back();
             double p95 = sorted[std::min(n - 1, static_cast<size_t>(n * 0.95))];
+            // Robust, GC-outlier-excluded statistics. A no-JIT interpreter (QuickJS) has a
+            // heavy GC tail: occasional frames run 2-3x the steady-state cost. The arithmetic
+            // mean conflates that tail with steady-state render cost, so we also report:
+            //   median (p50)        — the typical frame, fully outlier-insensitive
+            //   trimmed mean (p95)  — mean of the lowest 95% of frames (drops the GC spikes),
+            //                         the "steady-state average" with outliers excluded.
+            double median = sorted[n / 2];
+            size_t keep = static_cast<size_t>(n * 0.95); // drop the worst 5% (GC outliers)
+            if (keep == 0) keep = n;
+            double trimmedSum = 0.0;
+            for (size_t i = 0; i < keep; ++i) trimmedSum += sorted[i];
+            double trimmedMean = keep ? trimmedSum / keep : 0.0;
             double wallPerFrame = n ? wallMs / n : 0.0;
             double wallFps = wallPerFrame > 0.0 ? 1000.0 / wallPerFrame : 0.0;
             // Per-frame WALL time stats (protocol avg_ms / p95_ms).
@@ -755,15 +767,19 @@ namespace lite::nativelite
                 "wall_ms=%.3f render_cpu_ms=%.3f render_cpu_ms_per_frame=%.4f "
                 "mem_peak_bytes=%llu mem_peak_mb=%.1f avg_ms=%.4f p95_ms=%.4f "
                 "cpu_avg_ms=%.4f cpu_min_ms=%.4f cpu_max_ms=%.4f cpu_p95_ms=%.4f "
+                "cpu_median_ms=%.4f cpu_trimmed_ms=%.4f "
                 "wall_ms_per_frame=%.4f wall_fps=%.1f\n",
                 sceneLabel.c_str(), loopLabel.c_str(), benchEngine.c_str(), kBackend, n,
                 wallMs, renderCpuMs, renderCpuPerFrame,
                 (unsigned long long)memPeakBytes, memPeakMb, avgMs, p95Ms,
-                avg, mn, mx, p95, wallPerFrame, wallFps);
+                avg, mn, mx, p95, median, trimmedMean, wallPerFrame, wallFps);
             std::fflush(stdout);
             std::fprintf(stderr, "[nativelite] benchmark complete (%zu frames) — wall %.1f ms, "
-                "render_cpu %.1f ms (%.3f ms/frame), mem_peak %.1f MB, avg %.3f ms, p95 %.3f ms\n",
-                n, wallMs, renderCpuMs, renderCpuPerFrame, memPeakMb, avgMs, p95Ms);
+                "render_cpu %.1f ms (%.3f ms/frame), mem_peak %.1f MB, avg %.3f ms, p95 %.3f ms; "
+                "GC-excluded: median %.3f ms (%.1f fps), trimmed-mean %.3f ms (%.1f fps)\n",
+                n, wallMs, renderCpuMs, renderCpuPerFrame, memPeakMb, avgMs, p95Ms,
+                median, median > 0 ? 1000.0 / median : 0.0,
+                trimmedMean, trimmedMean > 0 ? 1000.0 / trimmedMean : 0.0);
             running = false;
             jsLoopRunning = false;
 #if defined(_WIN32)
